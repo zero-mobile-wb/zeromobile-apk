@@ -1,0 +1,4526 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ShadowPay API",
+    "version": "1.0.1",
+    "description": "# ShadowPay\n\nPayment protocol built for AI agents, subscriptions, and programmable commerce with sender anonymity.\n\n## What is ShadowPay?\n\nShadowPay is a payment protocol that implements the x402 \"Payment Required\" standard on Solana. \nWe verify payments on-chain with Groth16 ZK proofs while hiding the payer's identity through \nrelayer-mediated settlement. Privacy at the identity layer means no direct link between user \nwallet and merchant on-chain.\n\n### Core Privacy Features\n\n- Sender Anonymity (Default): Groth16 ZK proofs plus relayer settlement hide who paid\n- On-Chain Verification: Cryptographic proofs verified on Solana, not just logs\n- Escrow-Based Settlement: Users deposit to PDAs, relayer executes verified payments\n- Efficient Nullifiers: Per-user bitmap tracking (8,192 payments per user)\n- Gasless UX: Relayer covers transaction fees\n- Amount Encryption (Default): ElGamal encryption on BN254 curve hides payment amounts\n\n### Architecture Flow\n\n1. User deposits to Privacy Pool (mixed funds)\n2. Escrow auto-funded from pool (unlinkable!)\n3. Generate ZK Proof off-chain\n4. Submit proof to settler\n5. Relayer withdraws to merchant\n6. Private payment complete\n\n### Benefits\n\n- Sender identity hidden (no wallet-to-merchant link on-chain)\n- Proof validity verified on-chain\n- Programmable settlement (subscriptions, usage billing)\n- Webhook notifications\n- Relayer-mediated (semi-custodial, but verifiable)\n\n## Key Features\n\n### Privacy Layer\n- Sender Anonymity: Groth16 ZK proofs hide payer identity\n- Amount Encryption: ElGamal encryption on BN254 curve (default)\n- ShadowID: Merkle tree-based anonymous identity system\n- Relayer Privacy: No direct on-chain link between user and merchant\n\n### Payment Infrastructure\n- x402 Protocol: Standard HTTP 402 \"Payment Required\" implementation\n- Escrow PDAs: Non-custodial escrow accounts on Solana\n- On-Chain Verification: Proofs verified by Solana validators\n- Multi-Token: SOL, USDC, or any SPL token\n\n### Built for Agents and Apps\n- Subscriptions: Per-minute/hour/day/month recurring payments\n- Usage-Based Billing: Pay-per-request for APIs and AI services\n- Spending Authorizations: Pre-authorize agents to spend within limits\n- Webhooks: Real-time payment notifications\n- Service Marketplace: Discover and call x402-compliant APIs\n- Agent Registry: Register, discover, and hire AI agents\n\n### E-Commerce Integration\n- Shopify App: Private checkouts with sender anonymity\n- Merchant Dashboard: Track revenue, manage payouts\n- Analytics: Privacy-preserving payment analytics\n\n## Use Cases\n\n### AI Agent Payments\n\nFlow:\n1. Agent needs API access\n2. Deposits to privacy pool\n3. Generates proofs automatically\n4. Calls APIs with x402 headers\n5. Private, programmable payments\n\nPerfect for:\n- Autonomous agent spending\n- API consumption without revealing agent identity\n- Per-request billing for AI services\n\n### Subscription Services\n\nFlow:\n1. User subscribes\n2. Pre-authorizes monthly spending\n3. Agent auto-pays\n4. Service tracks via webhooks\n5. Privacy preserved\n\nPerfect for:\n- SaaS subscriptions\n- Per-minute/hour/day billing\n- Recurring payments without wallet popups\n\n### E-Commerce (Shopify)\n\nFlow:\n1. Customer checkout\n2. Generates ZK proof\n3. Relayer settles\n4. Merchant receives payment\n5. Customer identity hidden\n\nPerfect for:\n- Private online shopping\n- Anonymous purchases\n- Agent-driven commerce\n\n## Quick Start\n\n### Step 1: Get API Key\n```bash\ncurl -X POST https://shadow.radr.fun/shadowpay/v1/keys/new \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"wallet_address\": \"YOUR_SOLANA_WALLET\"}'\n```\n\n### Step 2: Register with ShadowID (Required for Privacy)\n```bash\n# User must sign message to prove wallet ownership\ncurl -X POST https://shadow.radr.fun/shadowpay/api/shadowid/auto-register \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"wallet_address\": \"YOUR_WALLET\",\n    \"signature\": \"BASE58_SIGNATURE\",\n    \"message\": \"ShadowPay Registration...\"\n  }'\n```\n\n### Step 3: Deposit to Escrow\n```bash\n# Deposit to privacy pool\ncurl -X POST https://shadow.radr.fun/shadowpay/api/pool/deposit \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"wallet\": \"YOUR_WALLET\",\n    \"amount\": 50000000\n  }'\n\n# Sign and submit transaction with your wallet\n```\n\n### Step 4: Make Private Payment\n```javascript\n// Browser/Node.js - Load circuit files\nconst client = new ShadowPayClient({\n  baseUrl: 'https://shadow.radr.fun/shadowpay'\n});\nawait client.init();\n\n// Generate ZK proof\nconst payment = await client.generatePayment({\n  amount: 1000000, // 0.001 SOL in lamports\n  recipient: 'MERCHANT_WALLET',\n  resource: 'API Call',\n  senderCommitment: 'YOUR_SHADOWID_COMMITMENT' // From step 2\n});\n\n// Settle payment\nconst response = await fetch('https://shadow.radr.fun/shadowpay/settle', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-Key': 'YOUR_API_KEY'\n  },\n  body: JSON.stringify({\n    x402Version: 1,\n    paymentHeader: btoa(JSON.stringify(payment)),\n    resource: 'API Call',\n    paymentRequirements: {\n      scheme: 'zkproof',\n      network: 'solana-mainnet',\n      maxAmountRequired: '0.001', // SOL not lamports\n      resource: 'API Call',\n      description: 'Payment for API access',\n      mimeType: 'application/json',\n      payTo: 'MERCHANT_WALLET',\n      maxTimeoutSeconds: 300\n    }\n  })\n});\n```\n\n## Important Notes\n\n### Privacy Model\n- Sender identity is hidden via ZK proofs and relayer\n- On-chain verification proves payment validity\n- Amount is encrypted with ElGamal (default privacy)\n- Relayer-mediated settlement (trust but verify)\n\n### Best Practices\n1. Always register with signature (don't use deterministic mode in production)\n2. Use spending authorizations for agent/automated payments\n3. Monitor webhooks for real-time payment notifications\n4. Check escrow balance before generating proofs\n5. Amount in SOL: maxAmountRequired expects SOL, not lamports\n\n### Common Pitfalls\n- Sending maxAmountRequired in lamports (settler multiplies by 1e9)\n- Using auto-register without signature (security vulnerability)\n- Not passing senderCommitment to proof generation\n- Depositing via direct transfer instead of using API\n\n### Cost Structure (v1.01)\n- First payment: $0.86 (includes $0.84 one-time nullifier account setup)\n- Subsequent payments: $0.02 (just relayer fee)\n- Capacity: 8,192 payments per user before rotation\n- Rotation: Free (rent recovered), contact support when needed\n- Break-even: After 4 payments, you save money vs per-payment nullifiers\n\n## Authentication\n\nMost endpoints require an X-API-Key header.\n\nTo get started:\n1. Generate a real API key: POST /shadowpay/v1/keys/new\n2. Use the returned api_key in your X-API-Key header\n3. Note: Example keys in this documentation are placeholders and won't work\n\nExample:\n```bash\n# Generate key\ncurl -X POST https://shadow.radr.fun/shadowpay/v1/keys/new\n\n# Use key in requests\ncurl -H \"X-API-Key: your_real_api_key_here\" https://shadow.radr.fun/shadowpay/v1/pay/pubkey\n```\n\n## Base URL\nhttps://shadow.radr.fun/shadowpay\n\n## Security and Updates (v1.0.1)\n- Enhanced input validation (F3 security hardening)\n- Proof size limits (prevents resource exhaustion)\n- Production-tested on Solana mainnet\n",
+    "contact": {
+      "name": "ShadowPay Support",
+      "url": "https://shadow.radr.fun"
+    },
+    "license": {
+      "name": "Commercial License",
+      "url": "https://shadow.radr.fun/license"
+    },
+    "x-logo": {
+      "url": "https://shadow.radr.fun/logo.png",
+      "altText": "ShadowPay Logo",
+      "backgroundColor": "#1a1612"
+    }
+  },
+  "x-tagGroups": [
+    {
+      "name": "Core APIs",
+      "tags": [
+        "API Keys",
+        "Payment Intents",
+        "ZK Payments",
+        "x402 Protocol"
+      ]
+    },
+    {
+      "name": "Escrow and Balance",
+      "tags": [
+        "Escrow"
+      ]
+    },
+    {
+      "name": "Identity and Privacy",
+      "tags": [
+        "ShadowID",
+        "Privacy"
+      ]
+    },
+    {
+      "name": "Advanced Features",
+      "tags": [
+        "Subscriptions",
+        "Webhooks",
+        "Automated Payments"
+      ]
+    },
+    {
+      "name": "Marketplace",
+      "tags": [
+        "Service Registry",
+        "Agent Registry"
+      ]
+    },
+    {
+      "name": "Merchant Tools",
+      "tags": [
+        "Merchant",
+        "Receipts",
+        "Tokens"
+      ]
+    },
+    {
+      "name": "Circuit Files",
+      "tags": [
+        "Circuit Artifacts"
+      ]
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://shadow.radr.fun",
+      "description": "Production API"
+    }
+  ],
+  "tags": [
+    {
+      "name": "API Keys",
+      "description": "API key management"
+    },
+    {
+      "name": "Payment Intents",
+      "description": "Traditional payment flow (unsigned transactions)"
+    },
+    {
+      "name": "Escrow",
+      "description": "User escrow account management"
+    },
+    {
+      "name": "ZK Payments",
+      "description": "Zero-knowledge proof payment endpoints"
+    },
+    {
+      "name": "x402 Protocol",
+      "description": "HTTP 402 Payment Required protocol"
+    },
+    {
+      "name": "ShadowID",
+      "description": "Anonymous identity and Merkle tree proofs"
+    },
+    {
+      "name": "Automated Payments",
+      "description": "Optional spending authorizations for bots/services"
+    },
+    {
+      "name": "Circuit Artifacts",
+      "description": "ZK circuit files for client-side proof generation"
+    },
+    {
+      "name": "Merchant",
+      "description": "Merchant earnings, analytics, and decryption tools"
+    },
+    {
+      "name": "Receipts",
+      "description": "Receipt management and tree indexing"
+    },
+    {
+      "name": "Tokens",
+      "description": "SPL token configuration"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Webhook registration and management"
+    },
+    {
+      "name": "Privacy",
+      "description": "ElGamal encryption and decryption"
+    },
+    {
+      "name": "Service Registry",
+      "description": "x402 service marketplace"
+    },
+    {
+      "name": "Agent Registry",
+      "description": "AI agent marketplace"
+    },
+    {
+      "name": "Subscriptions",
+      "description": "Recurring payment management"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/shadowpay/v1/keys/new": {
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Generate new API key",
+        "description": "Create a new API key for a wallet address. No authentication required.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "description": "Solana wallet address (base58)",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "treasury_wallet": {
+                    "type": "string",
+                    "description": "Optional treasury wallet for receiving payments",
+                    "example": "A3ZEQpuepApGVRB7Z7zDFH33KkYCGh2WpUCai5U2mskr"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": {
+                      "type": "string",
+                      "example": "sp_live_1234567890abcdef"
+                    },
+                    "wallet_address": {
+                      "type": "string",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/keys/by-wallet/{wallet}": {
+      "get": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Get API key by wallet",
+        "description": "Retrieve API key for a wallet address. No authentication required.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Solana wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": {
+                      "type": "string",
+                      "example": "sp_live_1234567890abcdef"
+                    },
+                    "wallet_address": {
+                      "type": "string",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    },
+                    "treasury_wallet": {
+                      "type": "string",
+                      "nullable": true,
+                      "example": "A3ZEQpuepApGVRB7Z7zDFH33KkYCGh2WpUCai5U2mskr"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found"
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/keys/rotate": {
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Rotate API key",
+        "description": "Generate a new API key for your wallet by rotating the current one.\nThe old key will be marked as \"rotated\" and a new key will be returned.\n",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "current_key"
+                ],
+                "properties": {
+                  "current_key": {
+                    "type": "string",
+                    "description": "The current API key to rotate (same as X-API-Key header)",
+                    "example": "6Mc61gGtSj79v6qVceH3JM4UojfThLwQrf5deJbkYzoL"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key rotated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": {
+                      "type": "string",
+                      "description": "The new API key",
+                      "example": "8Pq91hHuTk80w7rXdfI4KN5VpkgUiMxRsg6efKclZapM"
+                    },
+                    "wallet_address": {
+                      "type": "string",
+                      "description": "Associated wallet address",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/keys/limits": {
+      "get": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Get API key rate limits",
+        "description": "Retrieve current rate limits and usage for the authenticated API key",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rate limits retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rps_limit": {
+                      "type": "integer",
+                      "description": "Requests per second limit",
+                      "example": 10
+                    },
+                    "tokens_remaining": {
+                      "type": "integer",
+                      "description": "Remaining requests this second",
+                      "example": 8
+                    },
+                    "daily_commits_used": {
+                      "type": "integer",
+                      "description": "Commitments used today",
+                      "example": 150
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/pool/balance/{wallet}": {
+      "get": {
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Get user's pool balance",
+        "description": "Check user's balance in the privacy-enhanced deposit pool",
+        "security": [],
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address",
+            "example": "GkFDUrKu1pDuDvVE1TrG5MAzXUMNak9Qs1ynZSQLLo87"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pool balance retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wallet": {
+                      "type": "string"
+                    },
+                    "available": {
+                      "type": "integer",
+                      "description": "Available balance in lamports"
+                    },
+                    "deposited": {
+                      "type": "integer",
+                      "description": "Total deposited"
+                    },
+                    "withdrawn_to_escrow": {
+                      "type": "integer",
+                      "description": "Amount moved to escrow"
+                    },
+                    "migrated": {
+                      "type": "boolean",
+                      "description": "Whether escrow was migrated to pool"
+                    },
+                    "pool_address": {
+                      "type": "string",
+                      "description": "Pool PDA address"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/pool/deposit": {
+      "post": {
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Deposit SOL to pool",
+        "description": "Create unsigned transaction to deposit SOL to privacy pool.\nFunds are mixed with other users for maximum privacy.\nMinimum deposit: 0.01 SOL\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet": {
+                    "type": "string",
+                    "description": "User's wallet address"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "description": "Amount in lamports (min 10,000,000)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unsigned transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "unsigned_tx_base64": {
+                      "type": "string",
+                      "description": "Base64 unsigned transaction"
+                    },
+                    "pool_address": {
+                      "type": "string"
+                    },
+                    "user_balance_pda": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/pool/withdraw": {
+      "post": {
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Withdraw from pool (0.2% fee)",
+        "description": "Withdraw SOL from pool back to wallet.\n0.2% fee applies to discourage using pool as savings.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal info (requires user signature)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "amount_withdrawn": {
+                      "type": "integer",
+                      "description": "Amount after 0.2% fee"
+                    },
+                    "fee": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/pool/deposit-address": {
+      "get": {
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Get pool address",
+        "description": "Returns the pool PDA address for reference",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Pool address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pool_address": {
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/escrow/balance/{wallet}": {
+      "get": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "Get SOL escrow balance",
+        "description": "Check the balance of a user's SOL escrow account",
+        "security": [],
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Escrow balance retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wallet_address": {
+                      "type": "string",
+                      "description": "User's wallet address",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    },
+                    "balance": {
+                      "type": "integer",
+                      "description": "Balance in lamports",
+                      "example": 30000000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/escrow/balance-token/{wallet}/{mint}": {
+      "get": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "Get SPL token escrow balance",
+        "description": "Check the balance of a user's token escrow account for a specific SPL token",
+        "security": [],
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          {
+            "name": "mint",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "SPL token mint address",
+            "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token escrow balance retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wallet_address": {
+                      "type": "string",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    },
+                    "mint": {
+                      "type": "string",
+                      "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                    },
+                    "balance": {
+                      "type": "integer",
+                      "description": "Balance in token's smallest unit",
+                      "example": 1000000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/escrow/deposit": {
+      "post": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "Deposit SOL to escrow",
+        "description": "Create an unsigned transaction to deposit SOL into user's escrow account.\nUser must sign and submit the transaction.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "description": "User's wallet address",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "description": "Amount to deposit in lamports",
+                    "example": 20000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unsigned transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unsigned_tx_base64": {
+                      "type": "string",
+                      "description": "Base64-encoded unsigned transaction"
+                    },
+                    "recent_blockhash": {
+                      "type": "string",
+                      "description": "Recent blockhash used"
+                    },
+                    "last_valid_block_height": {
+                      "type": "integer",
+                      "description": "Last valid block height",
+                      "example": 285647293
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/escrow/withdraw": {
+      "post": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "User withdraws SOL from escrow",
+        "description": "Create an unsigned transaction for a user to withdraw their SOL balance from escrow back to their wallet.\n\nRequirements:\n- User must sign the transaction\n- Must have sufficient balance in escrow\n- Calls the user_withdraw instruction on the smart contract\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "description": "User's wallet address (must sign transaction)",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "description": "Amount to withdraw in lamports",
+                    "example": 10000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unsigned transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unsigned_tx_base64": {
+                      "type": "string",
+                      "description": "Base64-encoded unsigned transaction"
+                    },
+                    "recent_blockhash": {
+                      "type": "string",
+                      "description": "Recent blockhash used"
+                    },
+                    "last_valid_block_height": {
+                      "type": "integer",
+                      "description": "Last valid block height",
+                      "example": 285647293
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or insufficient balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/escrow/withdraw-tokens": {
+      "post": {
+        "tags": [
+          "Escrow"
+        ],
+        "summary": "User withdraws SPL tokens from escrow",
+        "description": "Create an unsigned transaction for a user to withdraw SPL tokens from their token escrow back to their wallet.\n\nRequirements:\n- User must sign the transaction\n- Must have sufficient token balance in escrow\n- Token account must exist for the user\n- Calls the user_withdraw_tokens instruction on the smart contract\n\nSupported tokens: USDC, USDT, RADR, or any configured SPL token\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "mint",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "description": "User's wallet address (must sign transaction)",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "mint": {
+                    "type": "string",
+                    "description": "SPL token mint address",
+                    "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "description": "Amount to withdraw (in token's smallest unit)",
+                    "example": 1000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unsigned transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unsigned_tx_base64": {
+                      "type": "string",
+                      "description": "Base64-encoded unsigned transaction"
+                    },
+                    "recent_blockhash": {
+                      "type": "string",
+                      "description": "Recent blockhash used"
+                    },
+                    "last_valid_block_height": {
+                      "type": "integer",
+                      "description": "Last valid block height",
+                      "example": 285647293
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, insufficient balance, or token account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/pay/intent": {
+      "post": {
+        "tags": [
+          "Payment Intents"
+        ],
+        "summary": "Create payment intent",
+        "description": "Generate an unsigned transaction for payment.\nUser signs and submits the transaction to complete payment.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount_lamports": {
+                    "type": "integer",
+                    "description": "Optional payment amount (uses default if not provided)",
+                    "example": 5000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment intent created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/pay/verify": {
+      "post": {
+        "tags": [
+          "Payment Intents"
+        ],
+        "summary": "Verify payment",
+        "description": "Verify a signed payment transaction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "invoice_id",
+                  "signature"
+                ],
+                "properties": {
+                  "invoice_id": {
+                    "type": "string",
+                    "example": "01HZQK8R3MXYZ9..."
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "Transaction signature (base58)",
+                    "example": "3Zx7..."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "paid"
+                    },
+                    "receipt": {
+                      "$ref": "#/components/schemas/Receipt"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/pay/pubkey": {
+      "get": {
+        "tags": [
+          "Payment Intents"
+        ],
+        "summary": "Get merchant public key",
+        "description": "Get the settler's merchant public key",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public key retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pubkey": {
+                      "type": "string",
+                      "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/prepare": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Prepare ZK payment",
+        "description": "Generate payment commitment and prepare unsigned transaction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "receiver_commitment",
+                  "amount"
+                ],
+                "properties": {
+                  "receiver_commitment": {
+                    "type": "string",
+                    "description": "Merchant wallet address or receiver commitment (hex or base58)",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Payment amount in lamports",
+                    "example": 5000000
+                  },
+                  "token_mint": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional SPL token mint address (defaults to SOL)",
+                    "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentPrepareResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/deposit": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Deposit for ZK payment",
+        "description": "Deposit funds to prepare for a ZK payment",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "example": 10000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deposit transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unsigned_tx_base64": {
+                      "type": "string"
+                    },
+                    "recent_blockhash": {
+                      "type": "string"
+                    },
+                    "last_valid_block_height": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/withdraw": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Withdraw from payment account",
+        "description": "Withdraw funds from payment account back to wallet",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "amount"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "example": 5000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unsigned_tx_base64": {
+                      "type": "string"
+                    },
+                    "recent_blockhash": {
+                      "type": "string"
+                    },
+                    "last_valid_block_height": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/authorize": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Authorize payment (x402 flow step 1)",
+        "description": "Check escrow balance and authorize payment for x402 flow.\nReturns access token for immediate content access while proof generates.\n",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment",
+                  "nullifier",
+                  "amount",
+                  "merchant"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string",
+                    "description": "Payment commitment",
+                    "example": "12345678901234567890"
+                  },
+                  "nullifier": {
+                    "type": "string",
+                    "description": "Payment nullifier",
+                    "example": "98765432109876543210"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "description": "Payment amount in lamports",
+                    "example": 1000000
+                  },
+                  "merchant": {
+                    "type": "string",
+                    "description": "Merchant wallet address",
+                    "example": "8Rem8ZqgVEg5TWS8hPTCEP91k6jNs2UhqWGBp5Nfnz4F"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string",
+                      "description": "JWT token for immediate access"
+                    },
+                    "commitment": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "integer"
+                    },
+                    "proof_deadline": {
+                      "type": "integer"
+                    },
+                    "nullifier": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/verify-access": {
+      "get": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Verify access token (x402 flow step 2)",
+        "description": "Verify that an access token is valid and payment is authorized",
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-Access-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Access token from authorize endpoint"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Access verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "authorized"
+                    },
+                    "commitment": {
+                      "type": "string"
+                    },
+                    "merchant": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/v1/payment/settle": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Settle payment (x402 flow step 3)",
+        "description": "Submit ZK proof to settle the payment on-chain.\nMust be called after authorize and before proof_deadline.\n",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment",
+                  "proof",
+                  "public_signals"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string",
+                    "example": "12345678901234567890"
+                  },
+                  "proof": {
+                    "type": "string",
+                    "description": "Base64-encoded Groth16 proof"
+                  },
+                  "public_signals": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "123",
+                      "456",
+                      "789"
+                    ]
+                  },
+                  "encrypted_amount": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "ElGamal encrypted amount (64 bytes)",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment settled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "signature": {
+                      "type": "string",
+                      "description": "Solana transaction signature"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/supported": {
+      "get": {
+        "tags": [
+          "x402 Protocol"
+        ],
+        "summary": "Get x402 supported methods",
+        "description": "Returns the payment methods supported by this x402 implementation",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Supported methods",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scheme": {
+                            "type": "string",
+                            "example": "zkproof"
+                          },
+                          "network": {
+                            "type": "string",
+                            "example": "solana-mainnet"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/verify": {
+      "post": {
+        "tags": [
+          "x402 Protocol"
+        ],
+        "summary": "Verify ZK proof payment",
+        "description": "Verify a zero-knowledge proof payment according to the x402 protocol.\n\nThis endpoint validates:\n- ZK proof structure and validity\n- Payment nullifier (prevents double-spending)\n- Encrypted amount commitment (ElGamal encryption)\n- Spending limits (if automated payment)\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/X402VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proof verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/X402VerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/shadowpay/premium": {
+      "get": {
+        "tags": [
+          "x402 Protocol"
+        ],
+        "summary": "x402 Demo Resource (Premium Content)",
+        "description": "x402-compliant paywalled resource that returns 402 Payment Required until payment is made.\n\n- Unpaid access: Returns 402 Payment Required with payment details\n- Paid access: Returns premium HTML content\n- Price: 0.001 SOL (1,000,000 lamports)\n\nThis is a live demo endpoint that can be registered on x402hub.\n",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Premium content (payment verified)",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-PAYMENT-RESPONSE": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Base64-encoded settlement response"
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentRequirements"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/settle": {
+      "post": {
+        "tags": [
+          "x402 Protocol"
+        ],
+        "summary": "Settle payment on-chain",
+        "description": "Execute the payment on-chain by withdrawing from escrow to merchant.\n\nSupports two modes:\n1. Manual: User provides signed transaction\n2. Automated: Relayer withdraws using spending authorization (optional)\n\nFor automated payments, include serviceAuth in metadata.\n\nNote: First payment from a user creates a reusable nullifier account.\nAll subsequent payments reuse this account, significantly reducing costs.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/X402SettleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment settled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/X402SettleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/shadowpay/api/shadowid/auto-register": {
+      "post": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Auto-register with signature",
+        "description": "Automatically register a wallet with ShadowID using signature verification.\nThis is the recommended way to register in production.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "wallet_address",
+                  "signature",
+                  "message"
+                ],
+                "properties": {
+                  "wallet_address": {
+                    "type": "string",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "Base58-encoded signature",
+                    "example": "5J7Zx..."
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Message that was signed",
+                    "example": "ShadowPay Registration - Timestamp: 1234567890"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registration successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "registered": {
+                      "type": "boolean"
+                    },
+                    "commitment": {
+                      "type": "string"
+                    },
+                    "root": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/shadowid/register": {
+      "post": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Register identity commitment",
+        "description": "Register a Poseidon hash commitment in the ShadowID Merkle tree",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string",
+                    "description": "Poseidon hash commitment (hex or decimal string)",
+                    "example": "21250096362411284425646165465198222782140840808175069276180300395501913554557"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Commitment registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "commitment": {
+                      "type": "string"
+                    },
+                    "merkle_root": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/shadowid/proof": {
+      "post": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Get Merkle proof",
+        "description": "Get a Merkle proof for a commitment in the tree",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string",
+                    "description": "Commitment to get proof for",
+                    "example": "21250096362411284425..."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Merkle proof generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "type": "object",
+                      "properties": {
+                        "pathElements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "pathIndices": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        },
+                        "root": {
+                          "type": "string"
+                        },
+                        "leaf": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/shadowid/root": {
+      "get": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Get current Merkle root",
+        "description": "Get the current root of the ShadowID Merkle tree",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Merkle root retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "root": {
+                      "type": "string",
+                      "example": "fc074b20c26617d0..."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/shadowid/v1/id/init": {
+      "post": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Initialize ShadowID",
+        "description": "Initialize a new ShadowID identity",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ShadowID initialized"
+          }
+        }
+      }
+    },
+    "/shadowpay/shadowid/v1/id/register": {
+      "post": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Register ShadowID commitment",
+        "description": "Register a commitment in the ShadowID system",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Commitment registered"
+          }
+        }
+      }
+    },
+    "/shadowpay/shadowid/v1/id/status/{commitment}": {
+      "get": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Check registration status",
+        "description": "Check if a commitment is registered in ShadowID",
+        "security": [],
+        "parameters": [
+          {
+            "name": "commitment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Commitment to check"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "registered": {
+                      "type": "boolean"
+                    },
+                    "commitment": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/shadowid/v1/merkle/proof/{commitment}": {
+      "get": {
+        "tags": [
+          "ShadowID"
+        ],
+        "summary": "Get Merkle proof by commitment",
+        "description": "Retrieve Merkle proof for a specific commitment",
+        "security": [],
+        "parameters": [
+          {
+            "name": "commitment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Commitment to get proof for"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proof retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/paywall/prepare": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Prepare paywall payment",
+        "description": "Prepare a payment for paywall-protected content",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount",
+                  "merchant"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "integer",
+                    "example": 1000000
+                  },
+                  "merchant": {
+                    "type": "string",
+                    "example": "8Rem8ZqgVEg5TWS8hPTCEP91k6jNs2UhqWGBp5Nfnz4F"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commitment": {
+                      "type": "string"
+                    },
+                    "nullifier": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/paywall/verify": {
+      "post": {
+        "tags": [
+          "ZK Payments"
+        ],
+        "summary": "Verify paywall payment",
+        "description": "Verify a paywall payment proof",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "commitment",
+                  "proof"
+                ],
+                "properties": {
+                  "commitment": {
+                    "type": "string"
+                  },
+                  "proof": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valid": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/merchant/earnings": {
+      "get": {
+        "tags": [
+          "Merchant"
+        ],
+        "summary": "Get merchant earnings",
+        "description": "Retrieve earnings summary for authenticated merchant",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Earnings retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_earnings_lamports": {
+                      "type": "integer",
+                      "example": 50000000
+                    },
+                    "total_payments": {
+                      "type": "integer",
+                      "example": 150
+                    },
+                    "earnings_by_token": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/merchant/analytics": {
+      "get": {
+        "tags": [
+          "Merchant"
+        ],
+        "summary": "Get payment analytics",
+        "description": "Get detailed payment analytics for merchant",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Start date for analytics"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "End date for analytics"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analytics retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_revenue": {
+                      "type": "integer"
+                    },
+                    "payment_count": {
+                      "type": "integer"
+                    },
+                    "average_payment": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/merchant/withdraw": {
+      "post": {
+        "tags": [
+          "Merchant"
+        ],
+        "summary": "Merchant withdraw funds",
+        "description": "Withdraw accumulated merchant earnings to wallet",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "integer",
+                    "description": "Amount to withdraw in lamports",
+                    "example": 10000000
+                  },
+                  "destination": {
+                    "type": "string",
+                    "description": "Optional destination wallet (defaults to registered wallet)",
+                    "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/merchant/decrypt": {
+      "post": {
+        "tags": [
+          "Merchant"
+        ],
+        "summary": "Decrypt ElGamal amounts",
+        "description": "Decrypt ElGamal-encrypted payment amounts using merchant's private key.\nMerchants can decrypt amounts from payments they received.\n",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "encrypted_amount",
+                  "private_key"
+                ],
+                "properties": {
+                  "encrypted_amount": {
+                    "type": "string",
+                    "description": "Hex-encoded ElGamal ciphertext (64 bytes)",
+                    "example": "0x123abc..."
+                  },
+                  "private_key": {
+                    "type": "string",
+                    "description": "Merchant's ElGamal private key",
+                    "example": "0xdef456..."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Amount decrypted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "amount": {
+                      "type": "integer",
+                      "description": "Decrypted amount in lamports",
+                      "example": 1000000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/receipts/by-commitment": {
+      "get": {
+        "tags": [
+          "Receipts"
+        ],
+        "summary": "Get receipt by commitment",
+        "description": "Retrieve a payment receipt by commitment hash",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commitment",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Payment commitment"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receipt found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/receipts/tree/{user_wallet}": {
+      "get": {
+        "tags": [
+          "Receipts"
+        ],
+        "summary": "Get receipt tree info",
+        "description": "Get information about user's receipt Merkle tree",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tree info retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tree_address": {
+                      "type": "string"
+                    },
+                    "leaf_count": {
+                      "type": "integer"
+                    },
+                    "root": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/receipts/user/{user_wallet}": {
+      "get": {
+        "tags": [
+          "Receipts"
+        ],
+        "summary": "List user receipts",
+        "description": "List all receipts for a user",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "Maximum number of receipts to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            },
+            "description": "Pagination offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receipts retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "receipts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Receipt"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/tokens/supported": {
+      "get": {
+        "tags": [
+          "Tokens"
+        ],
+        "summary": "List supported SPL tokens",
+        "description": "Get list of all supported SPL tokens for payments",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Token list retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tokens": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SupportedToken"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/tokens/add": {
+      "post": {
+        "tags": [
+          "Tokens"
+        ],
+        "summary": "Add supported token",
+        "description": "Add a new SPL token to supported tokens list (admin only)",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mint",
+                  "symbol",
+                  "decimals"
+                ],
+                "properties": {
+                  "mint": {
+                    "type": "string",
+                    "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                  },
+                  "symbol": {
+                    "type": "string",
+                    "example": "USDC"
+                  },
+                  "decimals": {
+                    "type": "integer",
+                    "example": 6
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/tokens/update/{mint}": {
+      "patch": {
+        "tags": [
+          "Tokens"
+        ],
+        "summary": "Update token config",
+        "description": "Update configuration for a supported token (admin only)",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mint",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Token mint address"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "symbol": {
+                    "type": "string"
+                  },
+                  "decimals": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/tokens/remove/{mint}": {
+      "delete": {
+        "tags": [
+          "Tokens"
+        ],
+        "summary": "Remove token",
+        "description": "Remove a token from supported tokens list (admin only)",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mint",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Token mint address"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/register": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Register webhook",
+        "description": "Register a webhook URL for payment notifications",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://example.com/webhook"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "payment.received",
+                        "payment.settled",
+                        "payment.failed"
+                      ]
+                    },
+                    "example": [
+                      "payment.received",
+                      "payment.settled"
+                    ]
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Optional webhook secret for signature verification"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhook_id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/config": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Get webhook config",
+        "description": "Get current webhook configuration for authenticated merchant",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook config retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "webhook_id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "events": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/test": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Test webhook",
+        "description": "Send a test webhook notification",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "webhook_id"
+                ],
+                "properties": {
+                  "webhook_id": {
+                    "type": "string",
+                    "example": "webhook_123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Test webhook sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "response_status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/logs": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Get webhook logs",
+        "description": "Retrieve recent webhook delivery logs",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "Maximum number of logs to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logs retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "webhook_id": {
+                            "type": "string"
+                          },
+                          "event": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/stats": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Get webhook stats",
+        "description": "Get webhook delivery statistics",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stats retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_delivered": {
+                      "type": "integer"
+                    },
+                    "total_failed": {
+                      "type": "integer"
+                    },
+                    "success_rate": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/webhooks/deactivate": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Deactivate webhook",
+        "description": "Deactivate a registered webhook",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "webhook_id"
+                ],
+                "properties": {
+                  "webhook_id": {
+                    "type": "string",
+                    "example": "webhook_123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/privacy/keygen": {
+      "get": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Generate ElGamal keypair",
+        "description": "Generate a new ElGamal keypair on BN254 curve for amount encryption.\nMerchants use this to generate keys for receiving encrypted payments.\n",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Keypair generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "public_key": {
+                      "type": "string",
+                      "description": "Hex-encoded public key (32 bytes)",
+                      "example": "0x123abc..."
+                    },
+                    "private_key": {
+                      "type": "string",
+                      "description": "Hex-encoded private key (32 bytes) - Keep secure",
+                      "example": "0xdef456..."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/privacy/decrypt": {
+      "post": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Decrypt ElGamal ciphertext",
+        "description": "Decrypt an ElGamal ciphertext using the private key.\nUsed to decrypt payment amounts.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ciphertext",
+                  "private_key"
+                ],
+                "properties": {
+                  "ciphertext": {
+                    "type": "string",
+                    "description": "Hex-encoded ElGamal ciphertext (64 bytes)",
+                    "example": "0x123abc..."
+                  },
+                  "private_key": {
+                    "type": "string",
+                    "description": "Hex-encoded private key (32 bytes)",
+                    "example": "0xdef456..."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ciphertext decrypted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plaintext": {
+                      "type": "string",
+                      "description": "Decrypted value",
+                      "example": "1000000"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/authorize-spending": {
+      "post": {
+        "tags": [
+          "Automated Payments"
+        ],
+        "summary": "Register spending authorization",
+        "description": "Authorize a bot/service to spend from your escrow automatically.\n\nSecurity:\n- User must sign the authorization message\n- Spending limits enforced (per-transaction and daily)\n- Time-based expiration\n- Can be revoked anytime\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authorization registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/shadowpay/api/revoke-authorization": {
+      "post": {
+        "tags": [
+          "Automated Payments"
+        ],
+        "summary": "Revoke spending authorization",
+        "description": "Revoke a bot/service's permission to spend on your behalf",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authorization revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/shadowpay/api/my-authorizations/{wallet}": {
+      "get": {
+        "tags": [
+          "Automated Payments"
+        ],
+        "summary": "List spending authorizations",
+        "description": "Get all spending authorizations for a wallet",
+        "security": [],
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User's wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorizations retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAuthorizationsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/circuit/shadowpay_final.zkey": {
+      "get": {
+        "tags": [
+          "Circuit Artifacts"
+        ],
+        "summary": "Download proving key",
+        "description": "Download the ZK circuit proving key (zkey file)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Proving key file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/circuit/shadowpay_js/shadowpay.wasm": {
+      "get": {
+        "tags": [
+          "Circuit Artifacts"
+        ],
+        "summary": "Download circuit WASM",
+        "description": "Download the ZK circuit WebAssembly file",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "WASM file",
+            "content": {
+              "application/wasm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/circuit-elgamal/shadowpay-elgamal_final.zkey": {
+      "get": {
+        "tags": [
+          "Circuit Artifacts"
+        ],
+        "summary": "Download ElGamal proving key",
+        "description": "Download the ElGamal encryption proving key",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "ElGamal proving key",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/circuit-elgamal/shadowpay-elgamal_js/shadowpay-elgamal.wasm": {
+      "get": {
+        "tags": [
+          "Circuit Artifacts"
+        ],
+        "summary": "Download ElGamal WASM",
+        "description": "Download the ElGamal circuit WebAssembly file",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "ElGamal WASM file",
+            "content": {
+              "application/wasm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/marketplace/discover": {
+      "get": {
+        "tags": [
+          "Service Registry"
+        ],
+        "summary": "Discover services",
+        "description": "Find x402 services by capability, price, or reputation",
+        "security": [],
+        "parameters": [
+          {
+            "name": "capability",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by service capability"
+          },
+          {
+            "name": "max_price_sol",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Maximum price per request in SOL"
+          },
+          {
+            "name": "min_reputation",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Minimum reputation score (0-10)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceInfo"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/marketplace/register": {
+      "post": {
+        "tags": [
+          "Service Registry"
+        ],
+        "summary": "Register service",
+        "description": "Register a new x402 service in the marketplace",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterServiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service registered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "service_id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/marketplace/call": {
+      "post": {
+        "tags": [
+          "Service Registry"
+        ],
+        "summary": "Agent calls service",
+        "description": "AI agent automatically discovers, pays for, and calls a service",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCallResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/agents/discover": {
+      "get": {
+        "tags": [
+          "Agent Registry"
+        ],
+        "summary": "Discover agents",
+        "description": "Find AI agents by capability, price, or reputation",
+        "security": [],
+        "parameters": [
+          {
+            "name": "capability",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by agent capability"
+          },
+          {
+            "name": "max_price_sol",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Maximum price per task in SOL"
+          },
+          {
+            "name": "min_reputation",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Minimum reputation score (0-10)"
+          },
+          {
+            "name": "pricing_model",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "per_task",
+                "subscription",
+                "hourly"
+              ]
+            },
+            "description": "Agent pricing model"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentInfo"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/agents/register": {
+      "post": {
+        "tags": [
+          "Agent Registry"
+        ],
+        "summary": "Register agent",
+        "description": "Register a new AI agent in the marketplace",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent registered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/agents/hire": {
+      "post": {
+        "tags": [
+          "Agent Registry"
+        ],
+        "summary": "Hire agent",
+        "description": "Hire an AI agent to perform a task",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HireAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent hired successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HireAgentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shadowpay/api/agents/{agent_id}/tasks": {
+      "get": {
+        "tags": [
+          "Agent Registry"
+        ],
+        "summary": "Get agent tasks",
+        "description": "View task history for an agent",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent task history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentTask"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API key for authentication. Generate at /v1/keys/new"
+      }
+    },
+    "schemas": {
+      "IntentResponse": {
+        "type": "object",
+        "properties": {
+          "invoice_id": {
+            "type": "string",
+            "example": "01HZQK8R3MXYZ9..."
+          },
+          "unsigned_tx_base64": {
+            "type": "string",
+            "description": "Base64-encoded unsigned transaction"
+          },
+          "recentBlockhash": {
+            "type": "string",
+            "example": "BsdisDTcR4oaeVEopXjPB7H4aGmWNi33B4GqQ6gu3dxe"
+          },
+          "lastValidBlockHeight": {
+            "type": "integer",
+            "example": 285647293
+          },
+          "network": {
+            "type": "string",
+            "example": "solana-mainnet"
+          },
+          "merchant": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "amount_lamports": {
+            "type": "integer",
+            "example": 5000000
+          }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "invoice_id": {
+                "type": "string"
+              },
+              "amount_lamports": {
+                "type": "integer"
+              },
+              "timestamp": {
+                "type": "integer"
+              },
+              "network": {
+                "type": "string"
+              },
+              "merchant": {
+                "type": "string"
+              }
+            }
+          },
+          "sig": {
+            "type": "string",
+            "description": "Ed25519 signature (base58)"
+          },
+          "pubkey": {
+            "type": "string",
+            "description": "Settler's public key (base58)"
+          }
+        }
+      },
+      "PaymentPrepareResponse": {
+        "type": "object",
+        "properties": {
+          "payment_commitment": {
+            "type": "string",
+            "example": "commitment_01HZQK8R3M..."
+          },
+          "payment_nullifier": {
+            "type": "string",
+            "example": "nullifier_01HZQK8R3M..."
+          },
+          "unsigned_tx_base64": {
+            "type": "string"
+          },
+          "recent_blockhash": {
+            "type": "string"
+          },
+          "last_valid_block_height": {
+            "type": "integer"
+          }
+        }
+      },
+      "X402VerifyRequest": {
+        "type": "object",
+        "required": [
+          "x402Version",
+          "paymentHeader",
+          "paymentRequirements"
+        ],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "example": 1,
+            "description": "x402 protocol version"
+          },
+          "paymentHeader": {
+            "type": "string",
+            "description": "Base64-encoded X402PaymentPayload"
+          },
+          "paymentRequirements": {
+            "$ref": "#/components/schemas/PaymentRequirements"
+          }
+        }
+      },
+      "X402VerifyResponse": {
+        "type": "object",
+        "properties": {
+          "isValid": {
+            "type": "boolean",
+            "example": true
+          },
+          "invalidReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Reason for invalid proof",
+            "example": "Nullifier already used"
+          },
+          "paymentToken": {
+            "type": "string",
+            "nullable": true,
+            "example": "pt_1234567890abcdef",
+            "description": "Token for settlement (if valid)"
+          }
+        }
+      },
+      "X402SettleRequest": {
+        "type": "object",
+        "required": [
+          "x402Version",
+          "paymentHeader",
+          "paymentRequirements"
+        ],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "example": 1
+          },
+          "paymentHeader": {
+            "type": "string",
+            "description": "Base64-encoded X402PaymentPayload (includes ZK proof or signedTx)"
+          },
+          "paymentRequirements": {
+            "$ref": "#/components/schemas/PaymentRequirements"
+          },
+          "resource": {
+            "type": "string",
+            "description": "Resource URL being paid for",
+            "example": "https://api.example.com/premium"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata",
+            "properties": {
+              "userWallet": {
+                "type": "string",
+                "description": "User's wallet address (for automated payments)"
+              },
+              "serviceAuth": {
+                "type": "string",
+                "description": "Service authentication key (triggers spending authorization check)"
+              },
+              "amountCommitment": {
+                "type": "string",
+                "description": "Poseidon hash commitment of amount (32 bytes hex)"
+              },
+              "encryptedAmount": {
+                "type": "string",
+                "description": "ElGamal encrypted amount (64 bytes hex)"
+              },
+              "tokenMint": {
+                "type": "string",
+                "description": "SPL token mint (for token payments)"
+              }
+            }
+          }
+        }
+      },
+      "X402SettleResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "example": "Insufficient balance"
+          },
+          "txHash": {
+            "type": "string",
+            "nullable": true,
+            "description": "Transaction signature (if successful)"
+          },
+          "networkId": {
+            "type": "string",
+            "nullable": true,
+            "example": "solana-mainnet"
+          }
+        }
+      },
+      "PaymentRequirements": {
+        "type": "object",
+        "required": [
+          "scheme",
+          "network",
+          "maxAmountRequired",
+          "resource",
+          "description",
+          "mimeType",
+          "payTo",
+          "maxTimeoutSeconds"
+        ],
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "zkproof"
+            ],
+            "example": "zkproof"
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "solana-mainnet",
+              "solana-devnet"
+            ],
+            "example": "solana-mainnet"
+          },
+          "maxAmountRequired": {
+            "type": "string",
+            "description": "Maximum payment amount in SOL (not lamports)",
+            "example": "0.01"
+          },
+          "resource": {
+            "type": "string",
+            "description": "Resource URL being paid for",
+            "example": "https://api.example.com/premium"
+          },
+          "description": {
+            "type": "string",
+            "description": "Payment description",
+            "example": "Premium API access"
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "application/json"
+          },
+          "payTo": {
+            "type": "string",
+            "description": "Merchant wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "maxTimeoutSeconds": {
+            "type": "integer",
+            "description": "Payment timeout in seconds",
+            "example": 300
+          },
+          "extra": {
+            "type": "object",
+            "nullable": true,
+            "description": "Extra data (ZK proof, public signals, etc.)"
+          }
+        }
+      },
+      "RegisterAuthorizationRequest": {
+        "type": "object",
+        "required": [
+          "user_wallet",
+          "authorized_service",
+          "max_amount_per_tx",
+          "max_daily_spend",
+          "valid_until",
+          "user_signature"
+        ],
+        "properties": {
+          "user_wallet": {
+            "type": "string",
+            "description": "User's wallet address",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "authorized_service": {
+            "type": "string",
+            "description": "Service public key or API key to authorize",
+            "example": "BotServiceKey123"
+          },
+          "max_amount_per_tx": {
+            "type": "string",
+            "description": "Maximum amount per transaction in SOL",
+            "example": "0.01"
+          },
+          "max_daily_spend": {
+            "type": "string",
+            "description": "Maximum daily spending limit in SOL",
+            "example": "1.0"
+          },
+          "valid_until": {
+            "type": "integer",
+            "description": "Expiration timestamp (Unix seconds)",
+            "example": 1735689600
+          },
+          "user_signature": {
+            "type": "string",
+            "description": "Ed25519 signature of authorization message",
+            "example": "base58_signature..."
+          }
+        }
+      },
+      "RevokeAuthorizationRequest": {
+        "type": "object",
+        "required": [
+          "user_wallet",
+          "authorized_service",
+          "user_signature"
+        ],
+        "properties": {
+          "user_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "authorized_service": {
+            "type": "string",
+            "example": "BotServiceKey123"
+          },
+          "user_signature": {
+            "type": "string",
+            "example": "base58_signature..."
+          }
+        }
+      },
+      "AuthorizationResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "Authorization registered successfully"
+          },
+          "authorization_id": {
+            "type": "integer",
+            "nullable": true,
+            "example": 1
+          }
+        }
+      },
+      "SpendingAuthorization": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "user_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "authorized_service": {
+            "type": "string",
+            "example": "BotServiceKey123"
+          },
+          "max_amount_per_tx": {
+            "type": "integer",
+            "description": "Maximum per transaction in lamports",
+            "example": 10000000
+          },
+          "max_daily_spend": {
+            "type": "integer",
+            "description": "Maximum daily spend in lamports",
+            "example": 1000000000
+          },
+          "spent_today": {
+            "type": "integer",
+            "description": "Amount spent today in lamports",
+            "example": 50000000
+          },
+          "last_reset_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2024-10-29"
+          },
+          "valid_until": {
+            "type": "integer",
+            "description": "Expiration timestamp",
+            "example": 1735689600
+          },
+          "revoked": {
+            "type": "boolean",
+            "example": false
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Creation timestamp",
+            "example": 1698614400
+          }
+        }
+      },
+      "ListAuthorizationsResponse": {
+        "type": "object",
+        "properties": {
+          "authorizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingAuthorization"
+            }
+          }
+        }
+      },
+      "SupportedToken": {
+        "type": "object",
+        "properties": {
+          "mint": {
+            "type": "string",
+            "example": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+          },
+          "symbol": {
+            "type": "string",
+            "example": "USDC"
+          },
+          "decimals": {
+            "type": "integer",
+            "example": 6
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "ServiceInfo": {
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836"
+          },
+          "owner_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "endpoint": {
+            "type": "string",
+            "example": "https://api.example.com/analyze"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "sentiment-analysis",
+              "text-processing"
+            ]
+          },
+          "price_per_request": {
+            "type": "integer",
+            "description": "Price in lamports",
+            "example": 1000000
+          },
+          "price_per_token": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Price per token in lamports (for streaming)",
+            "example": null
+          },
+          "metadata": {
+            "type": "object",
+            "example": {
+              "name": "Sentiment Analyzer",
+              "version": "1.0"
+            }
+          },
+          "reputation_score": {
+            "type": "number",
+            "description": "Score from 0-10",
+            "example": 8.5
+          },
+          "total_payments": {
+            "type": "integer",
+            "example": 1247
+          },
+          "total_volume": {
+            "type": "integer",
+            "description": "Total SOL earned in lamports",
+            "example": 1247000000
+          }
+        }
+      },
+      "RegisterServiceRequest": {
+        "type": "object",
+        "required": [
+          "endpoint",
+          "capabilities",
+          "price_per_request_sol",
+          "owner_wallet",
+          "owner_signature"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "example": "https://api.example.com/analyze"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "sentiment-analysis",
+              "gpt-4"
+            ]
+          },
+          "price_per_request_sol": {
+            "type": "number",
+            "example": 0.001
+          },
+          "price_per_token_sol": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.00001
+          },
+          "metadata": {
+            "type": "object",
+            "example": {
+              "name": "My API",
+              "version": "1.0"
+            }
+          },
+          "owner_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "owner_signature": {
+            "type": "string",
+            "example": "signature_here"
+          },
+          "stake_tx": {
+            "type": "string",
+            "nullable": true,
+            "description": "On-chain stake transaction (optional)",
+            "example": null
+          }
+        }
+      },
+      "AgentCallRequest": {
+        "type": "object",
+        "required": [
+          "service_id",
+          "agent_wallet",
+          "payment_commitment",
+          "request_body"
+        ],
+        "properties": {
+          "service_id": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836"
+          },
+          "agent_wallet": {
+            "type": "string",
+            "example": "AgentWalletAddressHere"
+          },
+          "payment_commitment": {
+            "type": "string",
+            "example": "commitment_hash_abc123"
+          },
+          "request_body": {
+            "type": "object",
+            "example": {
+              "text": "This is amazing!"
+            }
+          }
+        }
+      },
+      "AgentCallResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "response": {
+            "type": "object",
+            "description": "Service response data"
+          },
+          "price_paid_sol": {
+            "type": "number",
+            "example": 0.001
+          },
+          "response_time_ms": {
+            "type": "integer",
+            "example": 831
+          },
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          }
+        }
+      },
+      "AgentInfo": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836"
+          },
+          "agent_name": {
+            "type": "string",
+            "example": "ResearchBot Pro"
+          },
+          "agent_endpoint": {
+            "type": "string",
+            "example": "https://my-agent.com/execute"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "research",
+              "web-scraping",
+              "summarization"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "example": "Autonomous research agent"
+          },
+          "pricing_model": {
+            "type": "string",
+            "enum": [
+              "per_task",
+              "subscription",
+              "hourly"
+            ],
+            "example": "per_task"
+          },
+          "base_price_sol": {
+            "type": "number",
+            "example": 0.1
+          },
+          "service_budget_sol": {
+            "type": "number",
+            "description": "Max SOL agent can spend on services per task",
+            "example": 0.5
+          },
+          "owner_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "reputation_score": {
+            "type": "number",
+            "description": "Score from 0-10",
+            "example": 8.5
+          },
+          "total_tasks_completed": {
+            "type": "integer",
+            "example": 124
+          },
+          "total_tasks_failed": {
+            "type": "integer",
+            "example": 6
+          },
+          "success_rate": {
+            "type": "number",
+            "description": "Success rate (0-1)",
+            "example": 0.95
+          },
+          "avg_response_time_seconds": {
+            "type": "integer",
+            "example": 30
+          },
+          "metadata": {
+            "type": "object",
+            "example": {
+              "runtime": "nodejs",
+              "version": "1.0.0"
+            }
+          },
+          "is_active": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "RegisterAgentRequest": {
+        "type": "object",
+        "required": [
+          "agent_name",
+          "agent_endpoint",
+          "capabilities",
+          "description",
+          "pricing_model",
+          "base_price_sol",
+          "service_budget_sol",
+          "owner_wallet",
+          "owner_signature"
+        ],
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "example": "ResearchBot Pro"
+          },
+          "agent_endpoint": {
+            "type": "string",
+            "example": "https://my-agent.com/execute"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "research",
+              "web-scraping"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "example": "AI research agent"
+          },
+          "pricing_model": {
+            "type": "string",
+            "enum": [
+              "per_task",
+              "subscription",
+              "hourly"
+            ],
+            "example": "per_task"
+          },
+          "base_price_sol": {
+            "type": "number",
+            "example": 0.1
+          },
+          "service_budget_sol": {
+            "type": "number",
+            "example": 0.5
+          },
+          "owner_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "owner_signature": {
+            "type": "string",
+            "example": "signature_here"
+          },
+          "metadata": {
+            "type": "object",
+            "example": {
+              "runtime": "nodejs"
+            }
+          }
+        }
+      },
+      "HireAgentRequest": {
+        "type": "object",
+        "required": [
+          "agent_id",
+          "task",
+          "max_budget_sol",
+          "user_wallet",
+          "payment_commitment"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836"
+          },
+          "task": {
+            "type": "object",
+            "description": "Flexible task definition",
+            "example": {
+              "query": "Research quantum computing"
+            }
+          },
+          "max_budget_sol": {
+            "type": "number",
+            "example": 0.5
+          },
+          "user_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "payment_commitment": {
+            "type": "string",
+            "example": "payment_commitment_hash"
+          }
+        }
+      },
+      "HireAgentResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "task_id": {
+            "type": "string",
+            "example": "task_AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836_1762047879"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "example": "accepted"
+          },
+          "estimated_completion_time": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Estimated seconds to completion",
+            "example": 60
+          },
+          "message": {
+            "type": "string",
+            "example": "Task accepted by agent. Estimated completion: 60 seconds"
+          }
+        }
+      },
+      "AgentTask": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "example": "task_agent_123_1762047879"
+          },
+          "agent_id": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR_1762047836"
+          },
+          "user_wallet": {
+            "type": "string",
+            "example": "AVSSWPbWRYDF7w8GZcrP6yVWsmRWPshMnziHqFQ5RaDR"
+          },
+          "task_input": {
+            "type": "object",
+            "example": {
+              "query": "Research quantum computing"
+            }
+          },
+          "task_result": {
+            "type": "object",
+            "nullable": true,
+            "example": {
+              "summary": "Quantum computing overview..."
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "example": "completed"
+          },
+          "price_paid_sol": {
+            "type": "number",
+            "example": 0.1
+          },
+          "services_cost_sol": {
+            "type": "number",
+            "example": 0.02
+          },
+          "started_at": {
+            "type": "integer",
+            "description": "Unix timestamp",
+            "example": 1762047879
+          },
+          "completed_at": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Unix timestamp",
+            "example": 1762047909
+          },
+          "error_message": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Invalid payment header"
+          },
+          "status": {
+            "type": "string",
+            "example": "unpaid"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "Invalid payment header: missing field",
+              "status": "unpaid"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized - Invalid or missing API key",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "example": "Invalid API key"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
