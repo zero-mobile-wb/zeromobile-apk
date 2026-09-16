@@ -26,7 +26,10 @@ export default {
             "supportsTablet": true,
             "bundleIdentifier": "com.zero.wallet",
             "infoPlist": {
-                "ITSAppUsesNonExemptEncryption": false
+                "ITSAppUsesNonExemptEncryption": false,
+                "NSAppTransportSecurity": {
+                    "NSAllowsArbitraryLoads": true
+                }
             }
         },
         android: {
@@ -51,7 +54,14 @@ export default {
         jsEngine: "hermes",
         plugins: [
             "./plugins/withGradleProperties",
-            "expo-build-properties",
+            [
+                "expo-build-properties",
+                {
+                    "android": {
+                        "usesCleartextTraffic": true
+                    }
+                }
+            ],
             "expo-font",
             "expo-secure-store",
             "expo-sharing",
