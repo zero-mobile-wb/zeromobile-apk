@@ -7,6 +7,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Header from '../components/Header';
 import colors from '../constants/colors';
 import { useTheme } from '../context/ThemeContext';
@@ -26,14 +28,15 @@ interface SendDetailsScreenProps {
       tokenMint: string;
       tokenSymbol: string;
       tokenDecimals: number;
+      transferType?: 'Public' | 'Private';
     };
   };
 }
 
 const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route }) => {
-  const { currentTheme } = useTheme();
+  const { currentTheme: t, themeId } = useTheme();
   const { connection } = useWallet();
-  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals } = route.params;
+  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals, transferType } = route.params;
   const [estimatedFee, setEstimatedFee] = useState<number>(0.000005);
 
   useEffect(() => {
@@ -63,6 +66,7 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
       tokenSymbol,
       tokenDecimals,
       status: 'submitting',
+      transferType
     });
   };
 
@@ -72,7 +76,15 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: currentTheme.primary }]}>
+    <View style={[styles.container, { backgroundColor: t.primary }]}>
+      <View style={styles.topGradient} pointerEvents="none">
+        <LinearGradient
+          colors={[t.gradientStart, 'transparent']}
+          style={{ flex: 1 }}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+        />
+      </View>
       <Header
         title="Confirm Send"
         showBack={true}
@@ -81,34 +93,35 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.amountSection}>
-          <Text style={styles.amountLabel}>You're sending</Text>
-          <Text style={styles.amountValue}>${amount}</Text>
-          <Text style={styles.currencyLabel}>≈ {parseFloat(amountInSOL).toFixed(4)} {tokenSymbol}</Text>
+          <Text style={[styles.amountLabel, { color: t.textLight }]}>You're sending</Text>
+          <Text style={[styles.amountValue, { color: t.text }]}>${amount}</Text>
+          <Text style={[styles.currencyLabel, { color: t.textLight }]}>≈ {parseFloat(amountInSOL).toFixed(4)} {tokenSymbol}</Text>
         </View>
 
-        <View style={styles.detailsCard}>
+        <View style={[styles.detailsCard, { backgroundColor: t.card, borderColor: t.border }]}>
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>To Address</Text>
+            <Text style={[styles.detailLabel, { color: t.textLight }]}>Transfer Type</Text>
+            <Text style={[styles.detailValue, { color: t.text }]}>{transferType || 'Public'}</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={[styles.detailLabel, { color: t.textLight }]}>To Address</Text>
             <View style={styles.addressContainer}>
-              <Text style={styles.addressFull} numberOfLines={2} ellipsizeMode="middle">
+              <Text style={[styles.addressFull, { color: t.text }]} numberOfLines={2} ellipsizeMode="middle">
                 {address}
               </Text>
-              <Text style={styles.addressShort}>{truncateAddress(address)}</Text>
+              <Text style={[styles.addressShort, { color: t.textLight }]}>{truncateAddress(address)}</Text>
             </View>
           </View>
 
-          <View style={styles.divider} />
-
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Network Fee</Text>
-            <Text style={styles.detailValue}>≈ {estimatedFee.toFixed(6)} SOL</Text>
+            <Text style={[styles.detailLabel, { color: t.textLight }]}>Network Fee</Text>
+            <Text style={[styles.detailValue, { color: t.text }]}>≈ {estimatedFee.toFixed(6)} SOL</Text>
           </View>
 
-          <View style={styles.divider} />
-
-          <View style={styles.detailRow}>
-            <Text style={[styles.detailLabel, styles.totalLabel]}>Total</Text>
-            <Text style={[styles.detailValue, styles.totalValue]}>
+          <View style={[styles.totalBox, { backgroundColor: t.border }]}>
+            <Text style={[styles.totalLabel, { color: t.text }]}>Total</Text>
+            <Text style={[styles.totalValue, { color: t.text }]}>
               {tokenSymbol === 'SOL'
                 ? `≈ ${(parseFloat(amountInSOL) + estimatedFee).toFixed(6)} SOL`
                 : `≈ ${parseFloat(amountInSOL).toFixed(6)} ${tokenSymbol} + ${estimatedFee.toFixed(6)} SOL`
@@ -117,17 +130,30 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
           </View>
         </View>
 
-        <View style={styles.warningBox}>
-          <Text style={styles.warningText}>
+        <View style={[styles.warningBox, themeId !== 'white' && { backgroundColor: 'rgba(255, 193, 7, 0.1)' }]}>
+          <Text style={[styles.warningText, themeId !== 'white' && { color: '#FFC107' }]}>
             Double-check the recipient address. Transactions cannot be reversed.
           </Text>
         </View>
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
-          <Text style={styles.sendButtonText}>Send</Text>
-        </TouchableOpacity>
+        {themeId === 'white' ? (
+          <TouchableOpacity style={[styles.sendButton, styles.sendButtonInner, { backgroundColor: t.text }]} onPress={handleSend}>
+            <Text style={[styles.sendButtonText, { color: t.background }]}>Send</Text>
+          </TouchableOpacity>
+        ) : (
+          <LinearGradient
+            colors={[t.gradientStart, t.gradientEnd]}
+            style={styles.sendButton}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <TouchableOpacity style={styles.sendButtonInner} onPress={handleSend}>
+              <Text style={[styles.sendButtonText, { color: t.btnText }]}>Send</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        )}
       </View>
     </View>
   );
@@ -137,6 +163,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.primary,
+  },
+  topGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    opacity: 0.25,
+    zIndex: 0,
   },
   content: {
     flex: 1,
@@ -165,8 +200,9 @@ const styles = StyleSheet.create({
   },
   detailsCard: {
     backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 22,
     marginBottom: 20,
     elevation: 2,
     shadowColor: colors.black,
@@ -175,10 +211,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   detailRow: {
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   detailLabel: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.gray,
     marginBottom: 8,
   },
@@ -194,22 +231,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.black,
-    fontFamily: 'monospace',
+    fontFamily: 'sans-serif',
   },
   addressShort: {
     fontSize: 12,
     color: colors.gray,
-    fontFamily: 'monospace',
+    fontFamily: 'sans-serif',
   },
-  divider: {
-    height: 1,
-    backgroundColor: colors.lightGray,
-    marginVertical: 8,
+  totalBox: {
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 8,
   },
   totalLabel: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
+    letterSpacing: 1.2,
     color: colors.black,
+    marginBottom: 6,
   },
   totalValue: {
     fontSize: 20,
@@ -233,15 +273,17 @@ const styles = StyleSheet.create({
     paddingVertical: 43,
   },
   sendButton: {
-    backgroundColor: colors.black,
-    paddingVertical: 18,
     borderRadius: 12,
-    alignItems: 'center',
     elevation: 3,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+  },
+  sendButtonInner: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    width: '100%',
   },
   sendButtonText: {
     color: colors.white,

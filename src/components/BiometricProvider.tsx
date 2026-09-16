@@ -1,18 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, AppStateStatus, View, StyleSheet, Modal, Text, TouchableOpacity } from 'react-native';
+import { AppState, AppStateStatus, View, StyleSheet, Modal, Text, TouchableOpacity, Image } from 'react-native';
 import BiometricService from '../services/biometricService';
-import colors from '../constants/colors';
-import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../context/ThemeContext';
+import { useWallet } from '../context/WalletContext';
 
 export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const { currentTheme } = useTheme();
+    const { isWalletConfirmed } = useWallet();
+    const isWalletConfirmedRef = useRef(isWalletConfirmed);
     const appState = useRef(AppState.currentState);
     const [isLocked, setIsLocked] = useState(false);
     const [isAuthenticating, setIsAuthenticating] = useState(false);
 
     useEffect(() => {
+        isWalletConfirmedRef.current = isWalletConfirmed;
+    }, [isWalletConfirmed]);
+
+    useEffect(() => {
         const initBiometrics = async () => {
             const isEnabled = await BiometricService.isEnabled();
-            if (isEnabled) {
+            if (isEnabled && isWalletConfirmedRef.current) {
                 console.log('[BiometricProvider] Cold start, locking wallet');
                 setIsLocked(true);
                 authenticate();
@@ -24,7 +31,8 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const handleAppStateChange = async (nextAppState: AppStateStatus) => {
             const isEnabled = await BiometricService.isEnabled();
 
-            if (!isEnabled) {
+            if (!isEnabled || !isWalletConfirmedRef.current) {
+                appState.current = nextAppState;
                 return;
             }
 
@@ -68,17 +76,14 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 transparent={false}
                 animationType="fade"
             >
-                <View style={styles.container}>
+                <View style={[styles.container, { backgroundColor: currentTheme.primary }]}>
                     <View style={styles.content}>
-                        <View style={styles.iconContainer}>
-                            <Ionicons name="lock-closed" size={80} color={colors.black} />
-                        </View>
-                        <Text style={styles.title}>Wallet Locked</Text>
-                        <Text style={styles.subtitle}>Authentication required to access your wallet</Text>
-
-                        <TouchableOpacity style={styles.unlockButton} onPress={authenticate}>
-                            <Ionicons name="finger-print" size={24} color={colors.white} style={styles.buttonIcon} />
-                            <Text style={styles.unlockButtonText}>Unlock Wallet</Text>
+                        <TouchableOpacity style={styles.imageButton} onPress={authenticate}>
+                            <Image
+                                source={require('../../assets/images/zero-logo.png')}
+                                style={styles.logoImage}
+                                resizeMode="contain"
+                            />
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -90,56 +95,25 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.primary,
         justifyContent: 'center',
         alignItems: 'center',
     },
     content: {
         alignItems: 'center',
         paddingHorizontal: 40,
+        marginBottom: 80, // Pushes the image up from absolute center
     },
-    iconContainer: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
-        backgroundColor: colors.white,
+    imageButton: {
+        alignItems: 'center',
         justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 32,
-        elevation: 4,
-        shadowColor: colors.black,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
+        padding: 16,
     },
-    title: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: colors.black,
-        marginBottom: 12,
-    },
-    subtitle: {
-        fontSize: 16,
-        color: colors.gray,
-        textAlign: 'center',
-        marginBottom: 48,
-        lineHeight: 24,
-    },
-    unlockButton: {
-        flexDirection: 'row',
-        backgroundColor: colors.black,
-        paddingVertical: 16,
-        paddingHorizontal: 32,
-        borderRadius: 12,
-        alignItems: 'center',
-        elevation: 2,
-    },
-    buttonIcon: {
-        marginRight: 12,
-    },
-    unlockButtonText: {
-        color: colors.white,
-        fontSize: 18,
-        fontWeight: '600',
+    logoImage: {
+        width: 150,
+        height: 150,
+        borderRadius: 24,
+        overflow: 'hidden',
     },
 });
+
+export default BiometricProvider;

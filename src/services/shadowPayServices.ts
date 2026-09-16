@@ -11,7 +11,7 @@ if (typeof global.Buffer === 'undefined') {
 
 import Constants from 'expo-constants';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl;
+const BACKEND_URL = ((Constants.expoConfig?.extra?.backendUrl as string) || '').replace(/\/$/, '');
 
 console.log('Using backend URL:', BACKEND_URL);
 

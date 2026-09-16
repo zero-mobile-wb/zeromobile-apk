@@ -1,22 +1,53 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { spendApi } from '../zerospend/services/api';
 
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Remote (and expo-notifications-backed) functionality is only available in a
+// built app (dev client / EAS / store build). Since SDK 53, merely IMPORTING
+// expo-notifications inside Expo Go triggers a runtime warning, because the
+// library runs a module-level auto-registration side effect
+// (DevicePushTokenAutoRegistration.fx -> addPushTokenListener).
+// So the library is lazy-loaded here and never touched in Expo Go — every
+// exported helper below is a silent no-op there.
+
+type NotificationsModule = typeof import('expo-notifications');
+
+let cachedModule: NotificationsModule | null = null;
+let handlerConfigured = false;
+
+async function loadNotifications(): Promise<NotificationsModule | null> {
+  if (Constants.appOwnership === 'expo') return null;
+  try {
+    if (!cachedModule) {
+      cachedModule = await import('expo-notifications');
+    }
+    if (!handlerConfigured && cachedModule) {
+      handlerConfigured = true;
+      cachedModule.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+    }
+    return cachedModule;
+  } catch (error) {
+    console.log('Notifications unavailable:', error);
+    return null;
+  }
+}
 
 /**
- * Request notification permissions
+ * Request notification permissions (built app only — no-op in Expo Go)
  */
 export async function requestNotificationPermissions(): Promise<boolean> {
   try {
+    const Notifications = await loadNotifications();
+    if (!Notifications) return false;
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -30,13 +61,19 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       return false;
     }
 
-    // Configure notification channel for Android
+    // Configure notification channels for Android (wallet + ZeroSpend)
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
+        name: 'Wallet',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
+        lightColor: '#0D5C54',
+      });
+      await Notifications.setNotificationChannelAsync('zerospend', {
+        name: 'ZeroSpend',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#1F5F5C',
       });
     }
 
@@ -58,6 +95,9 @@ export async function notifyIncomingTransaction(
   fromAddress?: string
 ): Promise<void> {
   try {
+    const Notifications = await loadNotifications();
+    if (!Notifications) return;
+
     // Build notification body with more details
     let body = `You received ${amount.toFixed(4)} ${token}`;
 
@@ -72,7 +112,7 @@ export async function notifyIncomingTransaction(
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: '💰 Incoming Transaction',
+        title: 'Money received',
         body,
         data: {
           signature,
@@ -100,13 +140,15 @@ export async function notifyTransactionConfirmed(
   type: 'sent' | 'received'
 ): Promise<void> {
   try {
-    const emoji = type === 'sent' ? '📤' : '📥';
-    const action = type === 'sent' ? 'sent' : 'received';
+    const Notifications = await loadNotifications();
+    if (!Notifications) return;
+
+    const action = type === 'sent' ? 'Sent' : 'Received';
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `${emoji} Transaction Confirmed`,
-        body: `Successfully ${action} ${amount.toFixed(4)} ${token}`,
+        title: 'Transfer confirmed',
+        body: `${action} ${amount.toFixed(4)} ${token}`,
         data: { type },
         sound: true,
       },
@@ -126,10 +168,13 @@ export async function notifyTransactionFailed(
   error: string
 ): Promise<void> {
   try {
+    const Notifications = await loadNotifications();
+    if (!Notifications) return;
+
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: '❌ Transaction Failed',
-        body: `Failed to send ${amount.toFixed(4)} ${token}`,
+        title: 'Transfer failed',
+        body: `Could not send ${amount.toFixed(4)} ${token}. Tap to review.`,
         data: { error, type: 'failed' },
         sound: true,
       },
@@ -149,6 +194,9 @@ export async function showNotification(
   data?: any
 ): Promise<void> {
   try {
+    const Notifications = await loadNotifications();
+    if (!Notifications) return;
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
@@ -164,10 +212,52 @@ export async function showNotification(
 }
 
 /**
+ * Get this device's Expo push token.
+ * Null in Expo Go (Expo Go cannot receive remote push tokens since SDK 53),
+ * on simulators, or without an EAS projectId. Only resolves in a built app.
+ */
+export async function getExpoPushToken(): Promise<string | null> {
+  try {
+    if (Constants.appOwnership === 'expo') {
+      console.log('Push: Expo Go does not support remote push, skipping token');
+      return null;
+    }
+    const Notifications = await loadNotifications();
+    if (!Notifications) return null;
+
+    const projectId = (Constants.expoConfig?.extra as any)?.eas?.projectId;
+    if (!projectId) {
+      console.log('Push: no EAS projectId configured, skipping token');
+      return null;
+    }
+    const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return data || null;
+  } catch (error) {
+    console.log('Push: Expo token unavailable (simulator or offline)');
+    return null;
+  }
+}
+
+/**
+ * Register this device for ZeroSpend server push (fire-and-forget safe)
+ */
+export async function registerPushToken(spendToken: string): Promise<void> {
+  try {
+    const pushToken = await getExpoPushToken();
+    if (!pushToken) return;
+    await spendApi.registerPushToken(spendToken, pushToken);
+  } catch (error) {
+    console.log('Push: registration skipped');
+  }
+}
+
+/**
  * Cancel all notifications
  */
 export async function cancelAllNotifications(): Promise<void> {
   try {
+    const Notifications = await loadNotifications();
+    if (!Notifications) return;
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch (error) {
     console.error('Error canceling notifications:', error);

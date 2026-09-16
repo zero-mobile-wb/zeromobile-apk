@@ -7,7 +7,7 @@ const originalPromisify = util.promisify;
 util.promisify = function safePromisify(original) {
   if (typeof original !== 'function') {
     // Return a no-op function instead of throwing
-    return async function() {
+    return async function () {
       return undefined;
     };
   }
@@ -102,12 +102,53 @@ if (!global.URL) {
   global.URLSearchParams = URLSearchParams;
 }
 
-// 12. btoa/atob for base64
-if (!global.btoa) {
-  global.btoa = (str) => Buffer.from(str, 'binary').toString('base64');
-}
-if (!global.atob) {
-  global.atob = (str) => Buffer.from(str, 'base64').toString('binary');
-}
+// 12. btoa/atob for base64 - Standalone and robust (overwrites native to ensure leniency)
+const b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+const b64lookup = new Uint8Array(256);
+for (let i = 0; i < b64chars.length - 1; i++) b64lookup[b64chars.charCodeAt(i)] = i;
+
+global.btoa = (input) => {
+  let str = String(input);
+  let output = '';
+  for (let block, charCode, idx = 0; str.charAt(idx | 0) || (idx % 1); output += b64chars.charAt(63 & block >> 8 - idx % 1 * 8)) {
+    charCode = str.charCodeAt(idx += 3 / 4);
+    if (charCode > 255) throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range.");
+    block = block << 8 | charCode;
+  }
+  return output;
+};
+
+global.atob = (input) => {
+  let str = String(input).replace(/[\t\n\f\r ]+/g, "").replace(/=+$/, "");
+  let output = '';
+  if (str.length % 4 == 1) throw new Error("'atob' failed: The string to be decoded is not correctly encoded.");
+  for (let bc = 0, bs, buffer, idx = 0; buffer = str.charAt(idx++);) {
+    buffer = b64chars.indexOf(buffer);
+    if (buffer === -1 || buffer === 64) continue;
+    bs = bc % 4 ? bs * 64 + buffer : buffer;
+    if (bc++ % 4) output += String.fromCharCode(255 & bs >> (-2 * bc & 6));
+  }
+  return output;
+};
+
+// 13. base64ToArrayBuffer utility
+global.base64ToArrayBuffer = (base64) => {
+  const binary = global.atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+global.base64FromArrayBuffer = (arrayBuffer) => {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return global.btoa(binary);
+};
 
 console.log('✅ Shim loaded - all polyfills ready');

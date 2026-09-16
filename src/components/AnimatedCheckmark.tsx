@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs */
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -5,6 +6,9 @@ import Svg, { Circle, Path } from 'react-native-svg';
 interface AnimatedCheckmarkProps {
   size?: number;
 }
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 const AnimatedCheckmark: React.FC<AnimatedCheckmarkProps> = ({ size = 80 }) => {
   const scaleAnim = useRef(new Animated.Value(0)).current;
@@ -26,10 +30,7 @@ const AnimatedCheckmark: React.FC<AnimatedCheckmarkProps> = ({ size = 80 }) => {
         useNativeDriver: false,
       }),
     ]).start();
-  }, [scaleAnim, checkAnim]);
-
-  const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-  const AnimatedPath = Animated.createAnimatedComponent(Path);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>

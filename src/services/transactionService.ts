@@ -20,12 +20,71 @@ export interface TransactionResult {
   error?: string;
 }
 
+export type Sender = 
+  | { type: 'keypair'; keypair: Keypair }
+  | { type: 'privy'; publicKey: PublicKey; provider: any };
+
+/**
+ * Standardized method to sign and send transactions using a Privy embedded wallet provider.
+ * This abstracts the complex varying interfaces provided by the Privy SDK.
+ */
+export async function signAndSendWithPrivy(
+  connection: Connection,
+  transaction: Transaction,
+  provider: any
+): Promise<string> {
+  let signature: string;
+  if (typeof provider.request === 'function') {
+    try {
+      const res = await provider.request({ method: 'signTransaction', params: { transaction, connection } });
+      
+      let serialized: Buffer | Uint8Array;
+      if (res && res.signedTransaction && typeof res.signedTransaction === 'string') {
+        const { Buffer } = await import('buffer');
+        serialized = Buffer.from(res.signedTransaction, 'base64');
+      } else {
+        const signedTx = res.transaction || res;
+        if (typeof signedTx.serialize === 'function') {
+          serialized = signedTx.serialize();
+        } else if (signedTx && signedTx.type === 'Buffer' && Array.isArray(signedTx.data)) {
+          const { Buffer } = await import('buffer');
+          serialized = Buffer.from(signedTx.data);
+        } else {
+          throw new Error("Unable to parse signed transaction format: " + JSON.stringify(signedTx));
+        }
+      }
+      signature = await connection.sendRawTransaction(serialized, { skipPreflight: false });
+    } catch (e: any) {
+      if (e.message && (e.message.includes('Method not supported') || e.message.includes('Unable to parse'))) {
+        const res = await provider.request({ method: 'signAndSendTransaction', params: { transaction, connection } });
+        signature = res.signature || res;
+      } else {
+        throw e;
+      }
+    }
+  } else if (typeof provider.signAndSendTransaction === 'function') {
+    const result = await provider.signAndSendTransaction({ transaction, connection });
+    signature = result.signature || result;
+  } else if (typeof provider.sendTransaction === 'function') {
+    const result = await provider.sendTransaction({ transaction, connection });
+    signature = result.signature || result;
+  } else if (typeof provider.signTransaction === 'function') {
+    const res = await provider.signTransaction({ transaction });
+    const signedTx = res.signedTransaction ? (await import('buffer')).Buffer.from(res.signedTransaction, 'base64') : (res.transaction || res);
+    const serialized = typeof signedTx.serialize === 'function' ? signedTx.serialize() : signedTx;
+    signature = await connection.sendRawTransaction(serialized, { skipPreflight: false });
+  } else {
+    throw new Error("Provider does not support any known transaction signing methods.");
+  }
+  return signature;
+}
+
 /**
  * Send SOL from one wallet to another
  */
 export async function sendSOL(
   connection: Connection,
-  fromKeypair: Keypair,
+  sender: Sender,
   toAddress: string,
   amountSOL: number
 ): Promise<TransactionResult> {
@@ -52,8 +111,11 @@ export async function sendSOL(
     // Convert SOL to lamports
     const lamports = Math.floor(amountSOL * LAMPORTS_PER_SOL);
 
+    // Get sender public key
+    const senderPubkey = sender.type === 'keypair' ? sender.keypair.publicKey : sender.publicKey;
+
     // Check sender's balance
-    const balance = await connection.getBalance(fromKeypair.publicKey);
+    const balance = await connection.getBalance(senderPubkey);
     
     // Estimate transaction fee (0.000005 SOL = 5000 lamports)
     const estimatedFee = 5000;
@@ -75,7 +137,7 @@ export async function sendSOL(
     // Create transaction
     const transaction = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: fromKeypair.publicKey,
+        fromPubkey: senderPubkey,
         toPubkey: toPublicKey,
         lamports,
       })
@@ -84,16 +146,19 @@ export async function sendSOL(
     // Get recent blockhash
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
     transaction.recentBlockhash = blockhash;
-    transaction.feePayer = fromKeypair.publicKey;
+    transaction.feePayer = senderPubkey;
 
-    // Sign transaction
-    transaction.sign(fromKeypair);
-
-    // Send transaction
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    });
+    // Sign and send transaction
+    let signature: string;
+    if (sender.type === 'keypair') {
+      transaction.sign(sender.keypair);
+      signature = await connection.sendRawTransaction(transaction.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+    } else {
+      signature = await signAndSendWithPrivy(connection, transaction, sender.provider);
+    }
 
     console.log('SOL transaction sent:', signature);
 
@@ -154,11 +219,12 @@ export async function sendSOL(
  */
 export async function sendSPLToken(
   connection: Connection,
-  fromKeypair: Keypair,
+  sender: Sender,
   toAddress: string,
   tokenMint: string,
   amount: number,
-  decimals: number
+  decimals: number,
+  reference?: string
 ): Promise<TransactionResult> {
   try {
     // Validate addresses
@@ -186,10 +252,13 @@ export async function sendSPLToken(
     // Convert amount to smallest unit (based on decimals)
     const amountInSmallestUnit = Math.floor(amount * Math.pow(10, decimals));
 
+    // Get sender public key
+    const senderPubkey = sender.type === 'keypair' ? sender.keypair.publicKey : sender.publicKey;
+
     // Get source token account (sender's token account)
     const fromTokenAccount = await getAssociatedTokenAddress(
       mintPublicKey,
-      fromKeypair.publicKey
+      senderPubkey
     );
 
     // Get destination token account (recipient's token account)
@@ -199,7 +268,7 @@ export async function sendSPLToken(
     );
 
     console.log('SPL Token Transfer:', {
-      from: fromKeypair.publicKey.toBase58(),
+      from: senderPubkey.toBase58(),
       to: toPublicKey.toBase58(),
       amount,
       decimals,
@@ -219,7 +288,7 @@ export async function sendSPLToken(
       console.log('Creating associated token account for recipient');
       transaction.add(
         createAssociatedTokenAccountInstruction(
-          fromKeypair.publicKey, // payer
+          senderPubkey, // payer
           toTokenAccount, // associated token account
           toPublicKey, // owner
           mintPublicKey // mint
@@ -228,28 +297,43 @@ export async function sendSPLToken(
     }
 
     // Add transfer instruction
-    transaction.add(
-      createTransferInstruction(
-        fromTokenAccount, // source
-        toTokenAccount, // destination
-        fromKeypair.publicKey, // owner
-        amountInSmallestUnit // amount
-      )
+    const transferIx = createTransferInstruction(
+      fromTokenAccount, // source
+      toTokenAccount, // destination
+      senderPubkey, // owner
+      amountInSmallestUnit // amount
     );
+    
+    if (reference) {
+      try {
+        transferIx.keys.push({
+          pubkey: new PublicKey(reference),
+          isSigner: false,
+          isWritable: false,
+        });
+      } catch (e) {
+        console.warn('Invalid reference public key:', reference);
+      }
+    }
+    
+    transaction.add(transferIx);
 
     // Get recent blockhash
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
     transaction.recentBlockhash = blockhash;
-    transaction.feePayer = fromKeypair.publicKey;
+    transaction.feePayer = senderPubkey;
 
-    // Sign transaction
-    transaction.sign(fromKeypair);
-
-    // Send transaction
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    });
+    // Sign and send transaction
+    let signature: string;
+    if (sender.type === 'keypair') {
+      transaction.sign(sender.keypair);
+      signature = await connection.sendRawTransaction(transaction.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+    } else {
+      signature = await signAndSendWithPrivy(connection, transaction, sender.provider);
+    }
 
     console.log('SPL Token transaction sent:', signature);
 

@@ -13,7 +13,10 @@ interface BalanceCache {
 }
 
 const balanceCache: BalanceCache = {};
-const BALANCE_CACHE_DURATION = 300000; // 5 minutes
+const BALANCE_CACHE_DURATION = 10000; // 10 seconds
+
+// Pending request dedup: don't fire concurrent fetches for the same wallet
+const pendingRequests: { [walletAddress: string]: Promise<WalletBalance> } = {};
 
 export interface TokenBalance {
   mint: string;
@@ -53,9 +56,15 @@ export async function getWalletBalance(
   forceRefresh: boolean = false
 ): Promise<WalletBalance> {
   const walletAddress = walletPublicKey.toBase58();
-  
+
   console.log('Fetching balance for:', walletAddress, 'Force refresh:', forceRefresh);
-  
+
+  // Dedup concurrent requests for the same wallet
+  if (!forceRefresh && walletAddress in pendingRequests) {
+    console.log('Reusing pending request for:', walletAddress);
+    return pendingRequests[walletAddress];
+  }
+
   // Check cache first (unless forced refresh)
   if (!forceRefresh) {
     const cached = balanceCache[walletAddress];
@@ -65,101 +74,122 @@ export async function getWalletBalance(
     }
   }
 
-  try {
-    // 1. Get SOL balance
-    const solLamports = await connection.getBalance(walletPublicKey);
-    const solBalance = solLamports / LAMPORTS_PER_SOL;
-    console.log('SOL Balance (lamports):', solLamports, 'SOL Balance:', solBalance);
+  const promise = (async (): Promise<WalletBalance> => {
+    try {
+      // 1. Get SOL balance
+      const solLamports = await connection.getBalance(walletPublicKey);
+      const solBalance = solLamports / LAMPORTS_PER_SOL;
+      console.log('SOL Balance (lamports):', solLamports, 'SOL Balance:', solBalance);
 
-    // 2. Get all SPL token accounts
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-      walletPublicKey,
-      { programId: TOKEN_PROGRAM_ID }
-    );
+      // 2. Get all SPL token accounts
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        walletPublicKey,
+        { programId: TOKEN_PROGRAM_ID }
+      );
+      console.log('Token accounts found:', tokenAccounts.value.length);
 
-    // 3. Extract token data
-    const tokens: Array<{
-      mint: string;
-      balance: number;
-      decimals: number;
-      uiAmount: number;
-    }> = [];
+      // 3. Extract token data
+      const tokens: Array<{
+        mint: string;
+        balance: number;
+        decimals: number;
+        uiAmount: number;
+      }> = [];
 
-    tokenAccounts.value.forEach(accountInfo => {
-      const parsedData = accountInfo.account.data as ParsedAccountData;
-      const tokenAmount = parsedData.parsed.info.tokenAmount;
+      tokenAccounts.value.forEach(accountInfo => {
+        const parsedData = accountInfo.account.data as ParsedAccountData;
+        const tokenAmount = parsedData.parsed.info.tokenAmount;
 
-      // Only include tokens with non-zero balance
-      if (tokenAmount.uiAmount > 0) {
-        tokens.push({
-          mint: parsedData.parsed.info.mint,
-          balance: tokenAmount.amount,
-          decimals: tokenAmount.decimals,
-          uiAmount: tokenAmount.uiAmount,
-        });
-      }
-    });
+        // Only include tokens with non-zero balance
+        if (tokenAmount.uiAmount > 0) {
+          tokens.push({
+            mint: parsedData.parsed.info.mint,
+            balance: tokenAmount.amount,
+            decimals: tokenAmount.decimals,
+            uiAmount: tokenAmount.uiAmount,
+          });
+        }
+      });
+      console.log('Non-zero token balances:', tokens.length);
 
-    // 4. Get all token prices (including SOL)
-    const allMints = [SOL_MINT, ...tokens.map(t => t.mint)];
-    const prices = await getMultipleTokenPrices(allMints);
+      // 4. Get all token prices (including SOL)
+      const allMints = [SOL_MINT, ...tokens.map(t => t.mint)];
+      const prices = await getMultipleTokenPrices(allMints);
 
-    // 5. Calculate SOL value
-    const solPriceUSD = prices[SOL_MINT] || 0;
-    const solValueUSD = solBalance * solPriceUSD;
-    console.log('SOL Price:', solPriceUSD, 'SOL Value USD:', solValueUSD);
+      // 5. Calculate SOL value
+      let solPriceUSD = prices[SOL_MINT] || 0;
+      if (solPriceUSD === 0) solPriceUSD = 150.0; // Devnet fallback SOL price
+      const solValueUSD = solBalance * solPriceUSD;
+      console.log('SOL Price:', solPriceUSD, 'SOL Value USD:', solValueUSD);
 
-    // 6. Fetch token metadata and calculate values
-    const tokensWithValues: TokenBalance[] = await Promise.all(
-      tokens.map(async (token) => {
-        const priceUSD = prices[token.mint] || 0;
-        const valueUSD = token.uiAmount * priceUSD;
-        
-        // Fetch token metadata (symbol, name, logo)
-        const metadata = await getTokenInfo(token.mint);
+      // 6. Fetch token metadata and calculate values
+      const metadataResults = await Promise.all(
+        tokens.map(token => getTokenInfo(token.mint))
+      );
 
-        return {
-          ...token,
-          symbol: metadata.symbol,
-          name: metadata.name,
-          logoURI: metadata.logoURI,
-          priceUSD,
-          valueUSD,
-        };
-      })
-    );
+      const tokensWithValues: TokenBalance[] = tokens.map((token, i) => {
+          let priceUSD = prices[token.mint] || 0;
 
-    // 7. Calculate total portfolio value
-    const totalTokenValue = tokensWithValues.reduce(
-      (sum, token) => sum + token.valueUSD,
-      0
-    );
-    const totalUSD = solValueUSD + totalTokenValue;
+          // Mock Devnet prices so the Send UI doesn't compute $0 value
+          if (priceUSD === 0) {
+            if (token.mint === '4zMMC9srt5Ri5X14YGWA8x9Ww7C1L1iKVp1PZov2D34x') priceUSD = 1.0; // Devnet USDC
+            if (token.mint === 'EJwZgeZrdC8TXTQbQBoL6bfuAnFUUy1PVCMB4DYPzVaS') priceUSD = 1.0; // Devnet USDT
+            if (token.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') priceUSD = 1.0; // Mainnet USDC
+            if (token.mint === 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB') priceUSD = 1.0; // Mainnet USDT
+            if (token.mint === 'So11111111111111111111111111111111111111112') priceUSD = 150.0; // Devnet SOL
+          }
 
-    console.log('Total Token Value:', totalTokenValue);
-    console.log('Total USD:', totalUSD);
+          const valueUSD = token.uiAmount * priceUSD;
+          const metadata = metadataResults[i];
 
-    const walletBalance: WalletBalance = {
-      totalUSD,
-      solBalance: solBalance,
-      solValueUSD,
-      tokens: tokensWithValues,
-      lastUpdated: Date.now(),
-    };
+          return {
+            ...token,
+            symbol: metadata.symbol || (token.mint === '4zMMC9srt5Ri5X14YGWA8x9Ww7C1L1iKVp1PZov2D34x' ? 'USDC' : token.mint === 'EJwZgeZrdC8TXTQbQBoL6bfuAnFUUy1PVCMB4DYPzVaS' ? 'USDT' : 'Unknown'),
+            name: metadata.name || 'Devnet Token',
+            logoURI: metadata.logoURI || (token.mint === '4zMMC9srt5Ri5X14YGWA8x9Ww7C1L1iKVp1PZov2D34x' ? 'https://assets.coingecko.com/coins/images/6319/large/usdc.png' : token.mint === 'EJwZgeZrdC8TXTQbQBoL6bfuAnFUUy1PVCMB4DYPzVaS' ? 'https://assets.coingecko.com/coins/images/325/large/Tether.png' : undefined),
+            priceUSD,
+            valueUSD,
+          };
+        }
+      );
 
-    // Cache the balance
-    balanceCache[walletAddress] = {
-      balance: walletBalance,
-      timestamp: Date.now(),
-    };
+      // 7. Calculate total portfolio value
+      const totalTokenValue = tokensWithValues.reduce(
+        (sum, token) => sum + token.valueUSD,
+        0
+      );
+      const totalUSD = solValueUSD + totalTokenValue;
 
-    console.log('Returning wallet balance:', walletBalance);
+      console.log('Total Token Value:', totalTokenValue);
+      console.log('Total USD:', totalUSD);
 
-    return walletBalance;
-  } catch (error) {
-    console.error('Error fetching wallet balance:', error);
-    throw error;
-  }
+      const walletBalance: WalletBalance = {
+        totalUSD,
+        solBalance: solBalance,
+        solValueUSD,
+        tokens: tokensWithValues,
+        lastUpdated: Date.now(),
+      };
+
+      // Cache the balance
+      balanceCache[walletAddress] = {
+        balance: walletBalance,
+        timestamp: Date.now(),
+      };
+
+      console.log('Returning wallet balance:', walletBalance);
+
+      return walletBalance;
+    } catch (error) {
+      console.error('Error fetching wallet balance:', error);
+      throw error;
+    }
+  })();
+
+  pendingRequests[walletAddress] = promise;
+  promise.finally(() => { delete pendingRequests[walletAddress]; });
+
+  return promise;
 }
 
 /**
@@ -206,7 +236,7 @@ export async function getLatestTransactions(
 
       parsedTransactions.push({
         signature: sig.signature,
-        blockTime: tx.blockTime,
+        blockTime: tx.blockTime ?? null,
         type,
         amount,
         status: tx.meta?.err ? 'failed' : 'success',

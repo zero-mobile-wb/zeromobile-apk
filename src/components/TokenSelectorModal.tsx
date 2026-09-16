@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,10 @@ import {
   FlatList,
   Image,
   Pressable,
+  TextInput,
 } from 'react-native';
 import colors from '../constants/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export interface SelectableToken {
   mint: string;
@@ -18,7 +20,9 @@ export interface SelectableToken {
   balance: number;
   priceUSD: number;
   valueUSD: number;
+  decimals?: number;
   logoURI?: string;
+  chainId?: number;
 }
 
 interface TokenSelectorModalProps {
@@ -37,6 +41,23 @@ const TokenSelectorModal: React.FC<TokenSelectorModalProps> = ({
   onClose,
 }) => {
   const [imageErrors, setImageErrors] = useState<{ [key: string]: boolean }>({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const { currentTheme, themeId } = useTheme();
+  const isDark = themeId === 'dark';
+
+  useEffect(() => {
+    if (visible) setSearchQuery('');
+  }, [visible]);
+
+  const filteredTokens = useMemo(() => {
+    if (!searchQuery.trim()) return tokens;
+    const q = searchQuery.toLowerCase();
+    return tokens.filter(t =>
+      t.name.toLowerCase().includes(q) ||
+      t.symbol.toLowerCase().includes(q) ||
+      t.mint.toLowerCase().includes(q)
+    );
+  }, [tokens, searchQuery]);
 
   const handleImageError = (mint: string) => {
     setImageErrors(prev => ({ ...prev, [mint]: true }));
@@ -48,7 +69,7 @@ const TokenSelectorModal: React.FC<TokenSelectorModalProps> = ({
 
     return (
       <TouchableOpacity
-        style={[styles.tokenItem, isSelected && styles.tokenItemSelected]}
+        style={[styles.tokenItem, isSelected && { backgroundColor: currentTheme.border }]}
         onPress={() => {
           onSelect(item);
           onClose();
@@ -62,18 +83,18 @@ const TokenSelectorModal: React.FC<TokenSelectorModalProps> = ({
               onError={() => handleImageError(item.mint)}
             />
           ) : (
-            <View style={[styles.tokenImage, styles.tokenImagePlaceholder]}>
-              <Text style={styles.tokenImageText}>{item.symbol[0]}</Text>
+            <View style={[styles.tokenImage, { backgroundColor: currentTheme.border, justifyContent: 'center', alignItems: 'center' }]}>
+              <Text style={[styles.tokenImageText, { color: currentTheme.text }]}>{item.symbol[0]}</Text>
             </View>
           )}
           <View style={styles.tokenInfo}>
-            <Text style={styles.tokenName}>{item.name}</Text>
-            <Text style={styles.tokenSymbol}>{item.symbol}</Text>
+            <Text style={[styles.tokenName, { color: currentTheme.text }]}>{item.name}</Text>
+            <Text style={[styles.tokenSymbol, { color: currentTheme.textLight }]}>{item.symbol}</Text>
           </View>
         </View>
         <View style={styles.tokenRight}>
-          <Text style={styles.tokenBalance}>{item.balance.toFixed(4)}</Text>
-          <Text style={styles.tokenValue}>${item.valueUSD.toFixed(2)}</Text>
+          <Text style={[styles.tokenBalance, { color: currentTheme.text }]}>{item.balance.toFixed(4)}</Text>
+          <Text style={[styles.tokenValue, { color: currentTheme.textLight }]}>${item.valueUSD.toFixed(2)}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -83,29 +104,62 @@ const TokenSelectorModal: React.FC<TokenSelectorModalProps> = ({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={onClose}
     >
       <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[
+            styles.modalContent,
+            {
+              backgroundColor: currentTheme.card,
+              borderTopColor: currentTheme.border,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: -6 },
+              shadowOpacity: isDark ? 0.4 : 0.12,
+              shadowRadius: 16,
+              elevation: 20,
+            },
+          ]}
+          onPress={(e) => e.stopPropagation()}
+        >
           {/* Drag Handle */}
-          <View style={styles.dragHandle} />
+          <View style={[styles.dragHandle, { backgroundColor: currentTheme.border }]} />
 
           {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Select Token</Text>
+          <View style={[styles.header, { borderBottomColor: currentTheme.border }]}>
+            <Text style={[styles.headerTitle, { color: currentTheme.text }]}>Select Token</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
+              <Text style={[styles.closeButtonText, { color: currentTheme.textLight }]}>✕</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={[styles.searchInput, { backgroundColor: currentTheme.border, color: currentTheme.text }]}
+              placeholder="Search by name, symbol, or address"
+              placeholderTextColor={currentTheme.textLight}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
           </View>
 
           {/* Token List */}
           <FlatList
-            data={tokens}
+            data={filteredTokens}
             renderItem={renderTokenItem}
             keyExtractor={(item) => item.mint}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={[styles.emptyText, { color: currentTheme.textLight }]}>No tokens found</Text>
+              </View>
+            }
           />
         </Pressable>
       </Pressable>
@@ -116,21 +170,22 @@ const TokenSelectorModal: React.FC<TokenSelectorModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
     justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderTopWidth: 1,
     maxHeight: '80%',
     paddingBottom: 20,
   },
   dragHandle: {
-    width: 40,
-    height: 4,
+    width: 44,
+    height: 5,
     backgroundColor: colors.lightGray,
-    borderRadius: 2,
+    borderRadius: 99,
     alignSelf: 'center',
     marginTop: 12,
     marginBottom: 8,
@@ -148,6 +203,24 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: colors.black,
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  searchInput: {
+    height: 40,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    fontSize: 14,
+  },
+  emptyContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
   },
   closeButton: {
     width: 32,

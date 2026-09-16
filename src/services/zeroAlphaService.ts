@@ -2,12 +2,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl;
+const BACKEND_URL = ((Constants.expoConfig?.extra?.backendUrl as string) || '').replace(/\/$/, '');
+const AUTH_URL = `${BACKEND_URL}/api/auth`;
 const API_URL = `${BACKEND_URL}/api/zero`;
 
 export interface ZeroUser {
     _id: string;
     email: string;
+    name?: string;
+    country?: string;
     walletAddress: string;
     points: number;
     tradingVolume: number;
@@ -17,11 +20,31 @@ export interface ZeroUser {
     multiplier?: number;
 }
 
+export interface ZeroReward {
+    type: 'airdrop' | 'vesting';
+    streamflowId: string;
+    tier: string;
+    details?: {
+        sender: string;
+        mint: string;
+        totalAmount: string;
+        claimedAmount: string;
+        recipientsCount: number;
+        claimedCount: number;
+        clawbackDate: number;
+        isVested: boolean;
+    };
+}
+
 export const ZeroAlphaService = {
+
+    async saveUser(user: ZeroUser): Promise<void> {
+        await AsyncStorage.setItem('zero_alpha_user', JSON.stringify(user));
+    },
 
     async sendOtp(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            const response = await fetch(`${API_URL}/auth/login`, {
+            const response = await fetch(`${AUTH_URL}/send-otp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email }),
@@ -33,12 +56,26 @@ export const ZeroAlphaService = {
         }
     },
 
-    async verifyOtp(email: string, otp: string, walletAddress: string): Promise<{ success: boolean; user?: ZeroUser; error?: string }> {
+    async updateWalletAddress(email: string, walletAddress: string): Promise<{ success: boolean; error?: string }> {
         try {
-            const response = await fetch(`${API_URL}/auth/verify`, {
+            const response = await fetch(`${API_URL}/user/wallet`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, walletAddress }),
+            });
+            return await response.json();
+        } catch (error: any) {
+            console.error('Update Wallet Address Error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    async verifyOtp(email: string, otp: string, walletAddress: string, name?: string, country?: string): Promise<{ success: boolean; user?: ZeroUser; error?: string }> {
+        try {
+            const response = await fetch(`${AUTH_URL}/verify-otp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, otp, walletAddress }),
+                body: JSON.stringify({ email, otp, walletAddress, name, country }),
             });
             const data = await response.json();
 
@@ -48,6 +85,46 @@ export const ZeroAlphaService = {
             return data;
         } catch (error: any) {
             console.error('Verify OTP Error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    async updateUserProfile(email: string, name: string, country: string): Promise<{ success: boolean; user?: ZeroUser; error?: string }> {
+        try {
+            const response = await fetch(`${API_URL}/user/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, name, country }),
+            });
+            const data = await response.json();
+
+            if (data.success && data.user) {
+                const currentUser = await this.getStoredUser();
+                const updatedUser = { ...currentUser, ...data.user };
+                await AsyncStorage.setItem('zero_alpha_user', JSON.stringify(updatedUser));
+            }
+            return data;
+        } catch (error: any) {
+            console.error('Update Profile Error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    async loginWithGoogle(idToken: string, walletAddress: string): Promise<{ success: boolean; user?: ZeroUser; error?: string }> {
+        try {
+            const response = await fetch(`${AUTH_URL}/google`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_token: idToken, walletAddress }),
+            });
+            const data = await response.json();
+
+            if (data.success && data.user) {
+                await AsyncStorage.setItem('zero_alpha_user', JSON.stringify(data.user));
+            }
+            return data;
+        } catch (error: any) {
+            console.error('Google Login Error:', error);
             return { success: false, error: error.message };
         }
     },
@@ -125,9 +202,8 @@ export const ZeroAlphaService = {
                 await AsyncStorage.setItem('zero_alpha_user', JSON.stringify(user));
                 return user;
             } else if (response.status === 404) {
-                // User deleted on server
-                await AsyncStorage.removeItem('zero_alpha_user');
-                return null; // Return null to indicate no user found
+                // Return null to indicate no user found but don't delete the local session
+                return null;
             }
             return null;
         } catch (error) {
@@ -157,6 +233,22 @@ export const ZeroAlphaService = {
         } catch (error) {
             console.error('Leaderboard Error:', error);
             return [];
+        }
+    },
+
+    async getRewards(email: string): Promise<{ success: boolean; eligible: boolean; reward?: ZeroReward; message?: string; error?: string }> {
+        try {
+            const response = await fetch(`${API_URL}/rewards/${email}`);
+            const text = await response.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                console.error('Get Rewards JSON Parse Error:', text);
+                return { success: false, eligible: false, error: `Server Error: ${text.substring(0, 100)}` };
+            }
+        } catch (error: any) {
+            console.error('Get Rewards Error:', error);
+            return { success: false, eligible: false, error: error.message };
         }
     }
 };

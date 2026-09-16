@@ -25,7 +25,11 @@ const CurrencySelectionScreen: React.FC<CurrencySelectionScreenProps> = ({ navig
 
   const handleSelectCurrency = async (currency: Currency) => {
     await setSelectedCurrency(currency);
-    navigation.goBack();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('Settings' as any);
+    }
   };
 
   return (
@@ -33,7 +37,13 @@ const CurrencySelectionScreen: React.FC<CurrencySelectionScreenProps> = ({ navig
       <Header
         title="Select Currency"
         showBack={true}
-        onBackPress={() => navigation.goBack()}
+        onBackPress={() => {
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            navigation.navigate('Settings' as any);
+          }
+        }}
       />
 
       <ScrollView
@@ -41,7 +51,7 @@ const CurrencySelectionScreen: React.FC<CurrencySelectionScreenProps> = ({ navig
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.currencyList}>
+        <View style={[styles.currencyList, { backgroundColor: currentTheme.card }]}>
           {currencies.map((currency) => {
             const isSelected = selectedCurrency.code === currency.code;
             return (
@@ -49,21 +59,22 @@ const CurrencySelectionScreen: React.FC<CurrencySelectionScreenProps> = ({ navig
                 key={currency.code}
                 style={[
                   styles.currencyItem,
-                  isSelected && styles.currencyItemSelected,
+                  { borderBottomColor: currentTheme.border },
+                  isSelected && { backgroundColor: currentTheme.primary },
                 ]}
                 onPress={() => handleSelectCurrency(currency)}
               >
                 <View style={styles.currencyLeft}>
-                  <View style={styles.currencySymbol}>
-                    <Text style={styles.currencySymbolText}>{currency.symbol}</Text>
+                  <View style={[styles.currencySymbol, { backgroundColor: currentTheme.primary }]}>
+                    <Text style={[styles.currencySymbolText, { color: currentTheme.text }]}>{currency.symbol}</Text>
                   </View>
                   <View style={styles.currencyInfo}>
-                    <Text style={styles.currencyCode}>{currency.code}</Text>
-                    <Text style={styles.currencyName}>{currency.name}</Text>
+                    <Text style={[styles.currencyCode, { color: currentTheme.text }]}>{currency.code}</Text>
+                    <Text style={[styles.currencyName, { color: currentTheme.textLight }]}>{currency.name}</Text>
                   </View>
                 </View>
                 {isSelected && (
-                  <Ionicons name="checkmark-circle" size={24} color={colors.black} />
+                  <Ionicons name="checkmark-circle" size={24} color={currentTheme.text} />
                 )}
               </TouchableOpacity>
             );

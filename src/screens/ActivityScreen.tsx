@@ -13,13 +13,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Header from '../components/Header';
 import Navigation from '../components/Navigation';
-import SkeletonLoader from '../components/SkeletonLoader';
+import EqualizerLoader from '../components/EqualizerLoader';
 import colors from '../constants/colors';
 import { useTheme } from '../context/ThemeContext';
 import { useWallet } from '../context/WalletContext';
+import { useNetwork } from '../context/NetworkContext';
 import { RootStackParamList } from '../types/navigation';
 import { getTransactionHistory } from '../services/heliusApi';
-import Constants from 'expo-constants';
+import { usePrivy } from '@privy-io/expo';
+import TransactionItem, { Transaction } from '../components/TransactionItem';
 
 const MAX_TRANSACTIONS = 10; // Only show 10 most recent transactions
 const REFRESH_INTERVAL = 30000; // Check for new transactions every 30 seconds
@@ -28,84 +30,25 @@ interface ActivityScreenProps {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Activity'>;
 }
 
-interface Transaction {
-  signature: string;
-  type: 'send' | 'receive';
-  amount: number;
-  timestamp: number;
-  status: string;
-  token?: string;
-  tokenAddress?: string;
-}
-
-const getTokenLogoUrl = (tokenAddress: string | undefined): string => {
-  const solLogoUrl = Constants.expoConfig?.extra?.solLogoUrl || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
-  if (!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') {
-    // SOL logo
-    return solLogoUrl;
-  }
-  // Try to get token logo from Solana token list
-  return `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${tokenAddress}/logo.png`;
-};
-
-// Separate component for transaction items to properly use hooks
-const TransactionItem: React.FC<{ item: Transaction; formatTime: (timestamp: number) => string }> = ({ item, formatTime }) => {
-  const [imageError, setImageError] = useState(false);
-
-  return (
-    <View style={styles.activityItem}>
-      <View style={styles.activityIconContainer}>
-        {/* Token Logo */}
-        <View style={styles.tokenLogoContainer}>
-          {!imageError ? (
-            <Image
-              source={{ uri: getTokenLogoUrl(item.tokenAddress) }}
-              style={styles.tokenLogo}
-              onError={() => setImageError(true)}
-            />
-          ) : (
-            <View style={styles.tokenLogoFallback}>
-              <Text style={styles.tokenLogoFallbackText}>
-                {(item.token || 'SOL')[0]}
-              </Text>
-            </View>
-          )}
-        </View>
-        {/* Direction indicator badge */}
-        <View style={[
-          styles.directionBadge,
-          item.type === 'receive' ? styles.receiveBadge : styles.sendBadge
-        ]}>
-          <Ionicons
-            name={item.type === 'receive' ? 'arrow-down' : 'arrow-up'}
-            size={10}
-            color={colors.white}
-          />
-        </View>
-      </View>
-      <View style={styles.activityDetails}>
-        <Text style={styles.activityTitle}>{item.type === 'receive' ? 'Received' : 'Sent'}</Text>
-        <Text style={styles.activityTime}>{formatTime(item.timestamp)}</Text>
-      </View>
-      <View style={styles.activityAmount}>
-        <Text style={[styles.amountText, { color: item.type === 'receive' ? colors.black : colors.black }]}>
-          {item.type === 'receive' ? '+' : '-'}{item.amount.toFixed(4)}
-        </Text>
-      </View>
-    </View>
-  );
-};
-
 const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
-  const { currentTheme } = useTheme();
-  const { wallet, connection } = useWallet();
+  const { currentTheme, themeId } = useTheme();
+  const safeTheme = currentTheme as { primary: string; background: string };
+  const isDark = themeId === 'dark';
+  const { wallet, connection, activeSolanaAddress, isPrivyUser } = useWallet();
+  const { network } = useNetwork();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSignatureRef = useRef<string | null>(null);
 
-  const fetchTransactions = async (showLoading: boolean = true) => {
-    if (!wallet) {
+  const { isReady: privyReady } = usePrivy();
+  // Privy wallets are always mainnet — override network for tx history
+  const effectiveTxNetwork = isPrivyUser ? 'mainnet-beta' : network;
+
+  console.log('[Activity] privyReady:', privyReady, 'user:', activeSolanaAddress ? 'connected' : 'none', 'active:', activeSolanaAddress);
+
+  const fetchTransactions = async (address: string, showLoading: boolean = true) => {
+    if (!address) {
       setLoading(false);
       return;
     }
@@ -115,10 +58,9 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
     }
 
     try {
-      const walletAddress = wallet.publicKey.toBase58();
-
-      // Use Helius API to fetch transaction history
-      const txs = await getTransactionHistory(walletAddress, MAX_TRANSACTIONS);
+      // Privy wallets are always on mainnet
+      const effectiveNetwork = isPrivyUser ? 'mainnet-beta' : network;
+      const txs = await getTransactionHistory(address, MAX_TRANSACTIONS, effectiveNetwork);
 
       // Update last signature for comparison
       if (txs.length > 0) {
@@ -130,17 +72,28 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
       console.error('Error fetching transactions:', error);
       setTransactions([]);
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setTimeout(() => setLoading(false), 800);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    const addr = activeSolanaAddress;
+    if (!addr) {
+      console.log('[Activity] No address resolved yet; waiting for privy/wallet');
+      setLoading(false);
+      return;
+    }
+
     // Initial fetch
-    fetchTransactions();
+    fetchTransactions(addr);
 
     // Set up auto-refresh to check for new transactions
     intervalRef.current = setInterval(() => {
-      fetchTransactions(false); // Don't show loading spinner on auto-refresh
+      fetchTransactions(addr, false); // Don't show loading spinner on auto-refresh
     }, REFRESH_INTERVAL);
 
     // Cleanup interval on unmount
@@ -149,65 +102,32 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [wallet, connection]);
-
-  const formatTime = (timestamp: number) => {
-    const now = Date.now() / 1000;
-    const diff = now - timestamp;
-    const days = Math.floor(diff / 86400);
-    const hours = Math.floor(diff / 3600);
-    const minutes = Math.floor(diff / 60);
-
-    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-    return 'Just now';
-  };
+  }, [wallet, connection, activeSolanaAddress, network]);
 
   const renderTransaction = ({ item }: { item: Transaction }) => (
-    <TransactionItem item={item} formatTime={formatTime} />
-  );
-
-  const renderSkeletonItem = () => (
-    <View style={styles.activityItem}>
-      <SkeletonLoader width={40} height={40} borderRadius={20} />
-      <View style={styles.activityDetails}>
-        <SkeletonLoader width={100} height={16} borderRadius={8} style={{ marginBottom: 8 }} />
-        <SkeletonLoader width={80} height={14} borderRadius={6} />
-      </View>
-      <View style={styles.activityAmount}>
-        <SkeletonLoader width={80} height={16} borderRadius={8} />
-      </View>
-    </View>
-  );
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.primary }]}>
+    <TransactionItem item={item} />
+  );  return (
+      <SafeAreaView style={[styles.container, { backgroundColor: safeTheme.background || safeTheme.primary }]}>
       <Header
-        title="ACTIVITY"
+        title="Activity"
         showBack={false}
         showAddress={true}
         onTokensPress={() => navigation.navigate('Tokens')}
       />
 
+      <EqualizerLoader visible={loading} />
+
       {loading ? (
-        <View style={styles.content}>
-          <View style={styles.listContent}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((key) => (
-              <View key={key}>{renderSkeletonItem()}</View>
-            ))}
-          </View>
-        </View>
+        <View style={styles.content} />
       ) : transactions.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={64} color={colors.gray} />
-          <Text style={styles.emptyText}>No transactions yet</Text>
-          <Text style={styles.emptySubtext}>Your recent activity will appear here</Text>
+          <Text style={[styles.emptyText, { color: currentTheme.primary }]}>No transactions yet</Text>
+          <Text style={[styles.emptySubtext, { color: currentTheme.textLight }]}>Your recent activity will appear here</Text>
         </View>
       ) : (
         <View style={styles.content}>
           <View style={styles.transactionHeader}>
-            <Text style={styles.transactionCount}>
+            <Text style={[styles.transactionCount, { color: currentTheme.textLight }]}>
               Showing {transactions.length} most recent transaction{transactions.length !== 1 ? 's' : ''}
             </Text>
           </View>
@@ -227,8 +147,12 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
             navigation.navigate('Wallet');
           } else if (tab === 'activity') {
             navigation.navigate('Activity');
+          } else if (tab === 'swap') {
+            navigation.navigate('Swap');
           } else if (tab === 'settings') {
             navigation.navigate('Settings');
+          } else if (tab === 'bank') {
+            navigation.navigate('SpendEmail');
           }
         }}
       />
@@ -239,7 +163,6 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primary,
   },
   content: {
     flex: 1,
@@ -259,7 +182,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 18,
     fontWeight: '600',
-    color: colors.black,
+    color: colors.white,
   },
   emptySubtext: {
     marginTop: 8,
@@ -274,7 +197,7 @@ const styles = StyleSheet.create({
   },
   transactionCount: {
     fontSize: 14,
-    color: colors.gray,
+    color: '#666',
     fontWeight: '500',
   },
   activityItem: {
@@ -294,9 +217,9 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: colors.white,
+    backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: colors.lightGray,
+    borderColor: '#E0E0E0',
   },
   tokenLogo: {
     width: '100%',
@@ -305,12 +228,12 @@ const styles = StyleSheet.create({
   tokenLogoFallback: {
     width: '100%',
     height: '100%',
-    backgroundColor: colors.black,
+    backgroundColor: '#F0F0F0',
     justifyContent: 'center',
     alignItems: 'center',
   },
   tokenLogoFallbackText: {
-    color: colors.white,
+    color: '#000000',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -324,7 +247,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: '#e9e9e9',
   },
   receiveBadge: {
     backgroundColor: '#4CAF50',
@@ -359,8 +282,8 @@ const styles = StyleSheet.create({
   amountText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.black,
+    color: '#000000',
   },
-});
+});export default ActivityScreen;
 
-export default ActivityScreen;
+

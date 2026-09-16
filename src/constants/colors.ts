@@ -1,18 +1,39 @@
 // Theme color scheme
 export const themes = {
   white: {
-    id: 'white',
+    id: 'white' as const,
     name: 'Clean White',
     primary: '#e9e9e9',
     secondary: '#000000',
-    accent: '#e0e0e0ff',
-    background: '#fef7f7ff',
+    accent: '#5f969c',
+    background: '#FFFFFF',
     text: '#000000',
     textLight: '#6C757D',
-  }
+    card: '#FFFFFF',
+    border: '#E0E0E0',
+    gradientStart: '#70a7ac',
+    gradientEnd: '#5f969c',
+    btnText: '#FFFFFF',
+  },
+  dark: {
+    id: 'dark' as const,
+    name: 'Dark Midnight',
+    primary: '#111111',
+    secondary: '#FFFFFF',
+    accent: '#5f969c',
+    background: '#111111',
+    text: '#FFFFFF',
+    textLight: '#AAAAAA',
+    card: '#1A1A1A',
+    border: '#2A2A2A',
+    gradientStart: '#70a7ac',
+    gradientEnd: '#5f969c',
+    btnText: '#FFFFFF',
+  },
 } as const;
 
 export type ThemeId = keyof typeof themes;
+export type Theme = (typeof themes)[ThemeId];
 
 // Static colors (theme-independent)
 const staticColors = {

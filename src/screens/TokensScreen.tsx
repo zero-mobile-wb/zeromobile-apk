@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,16 +6,30 @@ import {
   SafeAreaView,
   FlatList,
   Image,
+  TouchableOpacity,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Constants from 'expo-constants';
 import Header from '../components/Header';
 import SkeletonLoader from '../components/SkeletonLoader';
-import colors from '../constants/colors';
+import LiquidGlassButton from '../components/LiquidGlassButton';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useWallet } from '../context/WalletContext';
 import { RootStackParamList } from '../types/navigation';
 import { getWalletBalance, WalletBalance } from '../services/balanceService';
-import Constants from 'expo-constants';
+import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
+import { PublicKey } from '@solana/web3.js';
+import { getEvmBalance, EVM_CHAINS } from '../services/chainService';
+import { STABLECOINS, Stablecoin } from '../constants/stablecoins';
+import { getStablecoinBalances, StablecoinBalance } from '../services/stablecoinService';
+import { fetchPreStockBalances, PreStockBalance } from '../services/prestockService';
+const COINGECKO_IDS: Record<string, string> = {
+  SOL: 'solana',
+  ETH: 'ethereum',
+  MATIC: 'matic-network',
+  MON: 'monad',
+};
 
 interface TokensScreenProps {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Tokens'>;
@@ -31,27 +45,39 @@ interface Token {
   priceUSD: number;
   valueUSD: number;
   image?: string;
+  isStablecoin?: boolean;
+  stablecoinData?: Stablecoin;
 }
 
 const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
   const { currentTheme } = useTheme();
-  const { wallet, connection } = useWallet();
+  const { wallet, connection, activeSolanaAddress, evmWallets } = useWallet();
   const [tokens, setTokens] = useState<Token[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalValue, setTotalValue] = useState(0);
+  const [stablecoinBalances, setStablecoinBalances] = useState<StablecoinBalance[]>([]);
+  const [viewMode, setViewMode] = useState<'tokens' | 'prestocks'>('tokens');
+  const [preStocks, setPreStocks] = useState<PreStockBalance[]>([]);
+  const [loadingPreStocks, setLoadingPreStocks] = useState(false);
+
+  const { user } = usePrivy();
+  const privySolanaWallet = useEmbeddedSolanaWallet();
+  const privyEthWallet = useEmbeddedEthereumWallet();
+  const privySolanaAddress = (privySolanaWallet.wallets?.[0] as any)?.address ?? null;
+  const privyEvmAddress = (privyEthWallet.wallets?.[0] as any)?.address ?? null;
+  const isPrivyUser = !!user && !!privySolanaAddress;
 
   useEffect(() => {
     const fetchTokens = async () => {
-      if (!wallet) {
+      if (!activeSolanaAddress) {
         setLoading(false);
         return;
       }
 
       try {
-        // Use the improved balance service which includes prices and metadata
-        const walletBalance = await getWalletBalance(wallet.publicKey, connection);
+        const pubkey = new PublicKey(activeSolanaAddress);
+        const walletBalance = await getWalletBalance(pubkey, connection);
 
-        // Build SOL token
         const solToken: Token = {
           mint: 'So11111111111111111111111111111111111111112',
           name: 'Solana',
@@ -64,24 +90,79 @@ const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
           image: Constants.expoConfig?.extra?.solLogoUrl || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
         };
 
-        // Build SPL tokens from balance service
-        const splTokens: Token[] = walletBalance.tokens.map((token) => ({
-          mint: token.mint,
-          name: token.name,
-          symbol: token.symbol,
-          amount: token.balance,
-          decimals: token.decimals,
-          uiAmount: token.uiAmount,
-          priceUSD: token.priceUSD,
-          valueUSD: token.valueUSD,
-          image: token.logoURI,
+        const splTokens: Token[] = walletBalance.tokens
+          .filter((token: any) => !['USDC', 'USDT'].includes(token.symbol))
+          .map((token) => ({
+            mint: token.mint,
+            name: token.name,
+            symbol: token.symbol,
+            amount: token.balance,
+            decimals: token.decimals,
+            uiAmount: token.uiAmount,
+            priceUSD: token.priceUSD,
+            valueUSD: token.valueUSD,
+            image: token.logoURI,
+          }));
+
+        const evmTokens: Token[] = [];
+        if (isPrivyUser && privyEvmAddress) {
+          await Promise.all(
+            EVM_CHAINS.map(async (chain) => {
+              const ethBalance = await getEvmBalance(privyEvmAddress, chain);
+              evmTokens.push({
+                mint: chain.id,
+                name: chain.name,
+                symbol: chain.symbol,
+                amount: ethBalance * Math.pow(10, chain.decimals),
+                decimals: chain.decimals,
+                uiAmount: ethBalance,
+                priceUSD: 0,
+                valueUSD: 0,
+                image: chain.logo,
+              });
+            })
+          );
+        }
+
+        // Build stablecoin tokens for the unified list
+        const scTokens: Token[] = STABLECOINS.map(sc => ({
+          mint: `stablecoin_${sc.symbol}`,
+          name: sc.name,
+          symbol: sc.symbol,
+          amount: 0,
+          decimals: 6,
+          uiAmount: 0,
+          priceUSD: 1.0,
+          valueUSD: 0,
+          image: sc.logo,
+          isStablecoin: true,
+          stablecoinData: sc,
         }));
 
-        setTokens([solToken, ...splTokens]);
+        // Fetch stablecoin balances
+        let scBalances: StablecoinBalance[] = [];
+        const evmWalletList = evmWallets.map(w => ({ address: w.address as `0x${string}`, chainId: w.chainId }));
+        if (privyEvmAddress) {
+          evmWalletList.push({ address: privyEvmAddress, chainId: 'ethereum' });
+        }
+        scBalances = await getStablecoinBalances(activeSolanaAddress, evmWalletList, 1.0, connection);
+        setStablecoinBalances(scBalances);
+
+        // Update stablecoin tokens with real balances
+        const enrichedScTokens = scTokens.map(st => {
+          const bal = scBalances.find(b => b.symbol === st.symbol);
+          return {
+            ...st,
+            uiAmount: bal?.totalBalance ?? 0,
+            valueUSD: bal?.totalUSD ?? 0,
+          };
+        });
+
+        // Unified list: SOL first, then stablecoins, then other tokens, then EVM
+        setTokens([solToken, ...enrichedScTokens, ...splTokens, ...evmTokens]);
         setTotalValue(walletBalance.totalUSD);
       } catch (error) {
         console.error('Error fetching tokens:', error);
-        // Set SOL token with 0 balance on error
         setTokens([{
           mint: 'So11111111111111111111111111111111111111112',
           name: 'Solana',
@@ -102,11 +183,75 @@ const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
     fetchTokens();
   }, [wallet, connection]);
 
-  const TokenItem = ({ item }: { item: Token }) => {
-    const [imageError, setImageError] = React.useState(false);
+  useEffect(() => {
+    const fetchPreStocksData = async () => {
+      if (!activeSolanaAddress || !connection) return;
+      setLoadingPreStocks(true);
+      try {
+        const balances = await fetchPreStockBalances(connection, activeSolanaAddress);
+        setPreStocks(balances);
+      } catch (e) {
+        console.error('PreStocks fetch error:', e);
+      } finally {
+        setLoadingPreStocks(false);
+      }
+    };
+    fetchPreStocksData();
+  }, [activeSolanaAddress, connection]);
 
+  const TokenItem = ({ item }: { item: Token }) => {
+    const [imageError, setImageError] = useState(false);
+
+    // Stablecoin row with chain logos
+    if (item.isStablecoin && item.stablecoinData) {
+      const sc = item.stablecoinData;
+      return (
+        <TouchableOpacity
+          style={[styles.tokenItem, { backgroundColor: currentTheme.card }]}
+          onPress={() => navigation.navigate('TokenDetail', { tokenSymbol: sc.symbol })}
+          activeOpacity={0.7}
+        >
+          <View style={styles.tokenInfo}>
+            <Image source={{ uri: sc.logo }} style={styles.tokenImage} />
+            <View style={styles.tokenDetails}>
+              <Text style={[styles.tokenName, { color: currentTheme.text }]}>{sc.name}</Text>
+              <View style={styles.chainLogosRow}>
+                {sc.chains.map((chain) => (
+                  <Image
+                    key={chain.id}
+                    source={{ uri: chain.logo }}
+                    style={styles.chainLogoSmall}
+                  />
+                ))}
+              </View>
+            </View>
+          </View>
+          <View style={styles.tokenBalance}>
+            <Text style={[styles.tokenAmount, { color: currentTheme.text }]}>
+              {item.uiAmount > 0 ? item.uiAmount.toFixed(2) : '0.00'}
+            </Text>
+            <Text style={[styles.tokenValue, { color: currentTheme.text }]}>
+              ${item.valueUSD.toFixed(2)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    // Regular token row
     return (
-      <View style={styles.tokenItem}>
+      <TouchableOpacity
+        style={[styles.tokenItem, { backgroundColor: currentTheme.card }]}
+        onPress={() => navigation.navigate('TokenDetail', {
+          tokenSymbol: item.symbol,
+          tokenName: item.name,
+          tokenLogo: item.image,
+          tokenMint: item.mint,
+          priceUSD: item.priceUSD,
+          coingeckoId: COINGECKO_IDS[item.symbol],
+        })}
+        activeOpacity={0.7}
+      >
         <View style={styles.tokenInfo}>
           {item.image && !imageError ? (
             <Image
@@ -115,33 +260,133 @@ const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
               onError={() => setImageError(true)}
             />
           ) : (
-            <View style={[styles.tokenImage, styles.tokenImagePlaceholder]}>
-              <Text style={styles.tokenImageText}>{item.symbol[0]}</Text>
+            <View style={[styles.tokenImage, styles.tokenImagePlaceholder, { backgroundColor: currentTheme.secondary }]}>
+              <Text style={[styles.tokenImageText, { color: currentTheme.primary }]}>{item.symbol[0]}</Text>
             </View>
           )}
           <View style={styles.tokenDetails}>
-            <Text style={styles.tokenName}>{item.name}</Text>
-            <Text style={styles.tokenSymbol}>{item.symbol}</Text>
+            <View style={styles.tokenNameRow}>
+              <Text style={[styles.tokenName, { color: currentTheme.text }]}>{item.name}</Text>
+              {isPrivyUser && ['ethereum', 'polygon', 'monad'].includes(item.mint) && (
+                <Ionicons name="lock-closed" size={10} color={currentTheme.textLight} style={{ marginLeft: 4 }} />
+              )}
+            </View>
+            <Text style={[styles.tokenSymbol, { color: currentTheme.textLight }]}>{item.symbol}</Text>
             {item.priceUSD > 0 && (
-              <Text style={styles.tokenPrice}>${item.priceUSD.toFixed(4)}</Text>
+              <Text style={[styles.tokenPrice, { color: currentTheme.textLight }]}>${item.priceUSD.toFixed(4)}</Text>
             )}
           </View>
         </View>
         <View style={styles.tokenBalance}>
-          <Text style={styles.tokenAmount}>{item.uiAmount.toFixed(4)}</Text>
-          <Text style={styles.tokenSymbolSmall}>{item.symbol}</Text>
+          <Text style={[styles.tokenAmount, { color: currentTheme.text }]}>{item.uiAmount.toFixed(4)}</Text>
+          <Text style={[styles.tokenSymbolSmall, { color: currentTheme.textLight }]}>{item.symbol}</Text>
           {item.valueUSD > 0 && (
-            <Text style={styles.tokenValue}>${item.valueUSD.toFixed(2)}</Text>
+            <Text style={[styles.tokenValue, { color: currentTheme.text }]}>${item.valueUSD.toFixed(2)}</Text>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   const renderToken = ({ item }: { item: Token }) => <TokenItem item={item} />;
 
+  const handleBuyPreStock = useCallback((stock: PreStockBalance) => {
+    (navigation.navigate as any)('Swap', {
+      outputToken: stock.contract_address,
+      outputSymbol: stock.symbol,
+      inputToken: 'USDC',
+    });
+  }, [navigation]);
+
+  const handleSellPreStock = useCallback((stock: PreStockBalance) => {
+    (navigation.navigate as any)('Swap', {
+      inputToken: stock.contract_address,
+      inputSymbol: stock.symbol,
+      outputToken: 'USDC',
+    });
+  }, [navigation]);
+
+  const PreStockItem = ({ item }: { item: PreStockBalance }) => {
+    const [imageError, setImageError] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+      <TouchableOpacity
+        style={[styles.prestockCard, { backgroundColor: currentTheme.card }]}
+        onPress={() => setExpanded(!expanded)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.prestockHeader}>
+          <View style={styles.tokenInfo}>
+            {item.image && !imageError ? (
+              <Image source={{ uri: item.image }} style={styles.tokenImage} onError={() => setImageError(true)} />
+            ) : (
+              <View style={[styles.tokenImage, styles.tokenImagePlaceholder, { backgroundColor: currentTheme.secondary }]}>
+                <Text style={[styles.tokenImageText, { color: currentTheme.primary }]}>{item.symbol[0]}</Text>
+              </View>
+            )}
+            <View style={styles.tokenDetails}>
+              <View style={styles.tokenNameRow}>
+                <Text style={[styles.tokenName, { color: currentTheme.text }]}>{item.name}</Text>
+                <Ionicons name="logo-slack" size={10} color={currentTheme.textLight} style={{ marginLeft: 4 }} />
+              </View>
+              <Text style={[styles.tokenSymbol, { color: currentTheme.textLight }]}>{item.symbol}</Text>
+            </View>
+          </View>
+          <View style={styles.tokenBalance}>
+            <Text style={[styles.tokenAmount, { color: currentTheme.text }]}>{item.balance > 0 ? item.balance.toFixed(4) : '0.0000'}</Text>
+            <Text style={[styles.tokenSymbolSmall, { color: currentTheme.textLight }]}>{item.symbol}</Text>
+            {item.usdValue > 0 && (
+              <Text style={[styles.tokenValue, { color: currentTheme.text }]}>${item.usdValue.toFixed(2)}</Text>
+            )}
+          </View>
+        </View>
+
+        {expanded && (
+          <View style={styles.prestockExpand}>
+            <View style={styles.prestockStatsRow}>
+              <View style={[styles.prestockStatCard, { backgroundColor: currentTheme.background }]}>
+                <Text style={[styles.prestockStatLabel, { color: currentTheme.textLight }]}>Price</Text>
+                <Text style={[styles.prestockStatValue, { color: currentTheme.text }]}>${item.priceUSD.toFixed(2)}</Text>
+              </View>
+              <View style={[styles.prestockStatCard, { backgroundColor: currentTheme.background }]}>
+                <Text style={[styles.prestockStatLabel, { color: currentTheme.textLight }]}>Balance</Text>
+                <Text style={[styles.prestockStatValue, { color: currentTheme.text }]}>{item.balance.toFixed(4)}</Text>
+              </View>
+              <View style={[styles.prestockStatCard, { backgroundColor: currentTheme.background }]}>
+                <Text style={[styles.prestockStatLabel, { color: currentTheme.textLight }]}>Value</Text>
+                <Text style={[styles.prestockStatValue, { color: currentTheme.text }]}>${item.usdValue.toFixed(2)}</Text>
+              </View>
+            </View>
+            {item.description ? (
+              <Text style={[styles.prestockDescription, { color: currentTheme.textLight }]} numberOfLines={3}>{item.description}</Text>
+            ) : null}
+            <View style={styles.prestockActions}>
+              <TouchableOpacity
+                style={[styles.prestockBtn, { backgroundColor: currentTheme.gradientStart }]}
+                onPress={() => handleBuyPreStock(item)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="card" size={16} color={currentTheme.btnText} />
+                <Text style={[styles.prestockBtnText, { color: currentTheme.btnText }]}>Buy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.prestockBtn, styles.prestockBtnSell, { borderColor: currentTheme.border }]}
+                onPress={() => handleSellPreStock(item)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="cash" size={16} color={currentTheme.text} />
+                <Text style={[styles.prestockBtnText, { color: currentTheme.text }]}>Sell</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   const renderSkeletonItem = () => (
-    <View style={styles.tokenItem}>
+    <View style={[styles.tokenItem, { backgroundColor: currentTheme.card }]}>
       <View style={styles.tokenInfo}>
         <SkeletonLoader width={40} height={40} borderRadius={20} />
         <View style={styles.tokenDetails}>
@@ -161,26 +406,52 @@ const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: currentTheme.primary }]}>
       <Header
-        title="Tokens"
         showBack={true}
         onBackPress={() => navigation.goBack()}
+        showTokenToggle
+        activeTokenView={viewMode}
+        onTokenToggle={setViewMode}
       />
 
       <View style={styles.content}>
-        {loading ? (
-          <View style={styles.listContent}>
-            {[1, 2, 3, 4, 5].map((key) => (
-              <View key={key}>{renderSkeletonItem()}</View>
-            ))}
-          </View>
+        {viewMode === 'tokens' ? (
+          loading ? (
+            <View style={styles.listContent}>
+              {[1, 2, 3, 4, 5].map((key) => (
+                <View key={key}>{renderSkeletonItem()}</View>
+              ))}
+            </View>
+          ) : (
+            <FlatList
+              data={tokens}
+              renderItem={renderToken}
+              keyExtractor={(item) => item.mint}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+            />
+          )
         ) : (
-          <FlatList
-            data={tokens}
-            renderItem={renderToken}
-            keyExtractor={(item) => item.mint}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-          />
+          loadingPreStocks ? (
+            <View style={styles.listContent}>
+              {[1, 2, 3, 4, 5].map((key) => (
+                <View key={key}>{renderSkeletonItem()}</View>
+              ))}
+            </View>
+          ) : (
+            <FlatList
+              data={preStocks}
+              renderItem={({ item }) => <PreStockItem item={item} />}
+              keyExtractor={(item) => item.contract_address}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="trending-up-outline" size={48} color={currentTheme.textLight} />
+                  <Text style={[styles.emptyText, { color: currentTheme.textLight }]}>No PreStock tokens found</Text>
+                </View>
+              }
+            />
+          )
         )}
       </View>
     </SafeAreaView>
@@ -193,17 +464,94 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  viewToggle: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  prestockExpand: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  prestockStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  prestockStatCard: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  prestockStatLabel: {
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  prestockStatValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  prestockDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  prestockActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  prestockBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 6,
+  },
+  prestockBtnSell: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+  },
+  prestockBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 48,
+    gap: 12,
+  },
+  emptyText: {
+    fontSize: 14,
   },
   listContent: {
-    paddingBottom: 20,
+    paddingBottom: 24,
+    gap: 8,
   },
   tokenItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
+    padding: 16,
+    borderRadius: 16,
+  },
+  prestockCard: {
+    padding: 16,
+    borderRadius: 16,
+  },
+  prestockHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   tokenInfo: {
     flexDirection: 'row',
@@ -217,32 +565,31 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   tokenImagePlaceholder: {
-    backgroundColor: colors.black,
     justifyContent: 'center',
     alignItems: 'center',
   },
   tokenImageText: {
-    color: colors.white,
     fontSize: 18,
     fontWeight: 'bold',
   },
   tokenDetails: {
     flex: 1,
   },
+  tokenNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   tokenName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: colors.black,
     marginBottom: 4,
   },
   tokenSymbol: {
     fontSize: 14,
-    color: colors.gray,
     marginBottom: 2,
   },
   tokenPrice: {
     fontSize: 12,
-    color: colors.gray,
   },
   tokenBalance: {
     alignItems: 'flex-end',
@@ -250,18 +597,26 @@ const styles = StyleSheet.create({
   tokenAmount: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: colors.black,
     marginBottom: 4,
   },
   tokenSymbolSmall: {
     fontSize: 12,
-    color: colors.gray,
     marginBottom: 2,
   },
   tokenValue: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.black,
+  },
+  chainLogosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  chainLogoSmall: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
 });
 
