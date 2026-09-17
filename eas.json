@@ -19,7 +19,7 @@
       "autoIncrement": true,
       "channel": "production",
       "android": {
-        "buildType": "abb"
+        "buildType": "app-bundle"
       }
     }
   },
