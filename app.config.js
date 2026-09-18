@@ -24,7 +24,7 @@ export default {
         },
         ios: {
             "supportsTablet": true,
-            "bundleIdentifier": "com.zero.wallet",
+            "bundleIdentifier": "com.zeromobile.wallet",
             "infoPlist": {
                 "ITSAppUsesNonExemptEncryption": false,
                 "NSAppTransportSecurity": {
@@ -43,7 +43,7 @@ export default {
                 "backgroundColor": "#0D5C54"
             },
             "predictiveBackGestureEnabled": false,
-            "package": "com.zero.wallet",
+            "package": "com.zeromobile.wallet",
             "permissions": [
                 "RECEIVE_BOOT_COMPLETED",
                 "VIBRATE",
