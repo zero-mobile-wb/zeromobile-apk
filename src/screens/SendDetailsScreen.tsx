@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,8 +14,9 @@ import Header from '../components/Header';
 import colors from '../constants/colors';
 import { useTheme } from '../context/ThemeContext';
 import { RootStackParamList } from '../types/navigation';
-import { getEstimatedFee } from '../services/transactionService';
+import { getEstimatedFee, hasEnoughSolForGas } from '../services/transactionService';
 import { useWallet } from '../context/WalletContext';
+import { CHAINS } from '../services/chainService';
 import BiometricService from '../services/biometricService';
 import { Alert } from 'react-native';
 
@@ -29,23 +31,38 @@ interface SendDetailsScreenProps {
       tokenSymbol: string;
       tokenDecimals: number;
       transferType?: 'Public' | 'Private';
+      chain?: string;
     };
   };
 }
 
 const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route }) => {
   const { currentTheme: t, themeId } = useTheme();
-  const { connection } = useWallet();
-  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals, transferType } = route.params;
+  const { connection, activeSolanaAddress } = useWallet();
+  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals, transferType, chain } = route.params;
   const [estimatedFee, setEstimatedFee] = useState<number>(0.000005);
+  const [useKora, setUseKora] = useState(false);
+  const isEvm = chain && chain !== 'solana';
+  const chainConfig = chain ? CHAINS[chain as keyof typeof CHAINS] : null;
+  const evmGasSymbol = chainConfig?.nativeCurrency?.symbol || 'ETH';
 
   useEffect(() => {
+    if (isEvm) {
+      setEstimatedFee(0.0001);
+      setUseKora(false);
+      return;
+    }
     const fetchFee = async () => {
       const fee = await getEstimatedFee(connection);
       setEstimatedFee(fee);
+
+      if (activeSolanaAddress) {
+        const hasSol = await hasEnoughSolForGas(connection, activeSolanaAddress);
+        setUseKora(!hasSol);
+      }
     };
     fetchFee();
-  }, [connection]);
+  }, [connection, activeSolanaAddress]);
 
   const handleSend = async () => {
     const isBiometricEnabled = await BiometricService.isEnabled();
@@ -66,7 +83,8 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
       tokenSymbol,
       tokenDecimals,
       status: 'submitting',
-      transferType
+      transferType,
+      chain,
     });
   };
 
@@ -95,38 +113,59 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
         <View style={styles.amountSection}>
           <Text style={[styles.amountLabel, { color: t.textLight }]}>You're sending</Text>
           <Text style={[styles.amountValue, { color: t.text }]}>${amount}</Text>
-          <Text style={[styles.currencyLabel, { color: t.textLight }]}>≈ {parseFloat(amountInSOL).toFixed(4)} {tokenSymbol}</Text>
+          <Text style={[styles.currencyLabel, { color: t.textLight }]}>≈ {parseFloat(amountInSOL).toString()} {tokenSymbol}</Text>
         </View>
 
         <View style={[styles.detailsCard, { backgroundColor: t.card, borderColor: t.border }]}>
+          {/* Transfer Type */}
           <View style={styles.detailRow}>
             <Text style={[styles.detailLabel, { color: t.textLight }]}>Transfer Type</Text>
             <Text style={[styles.detailValue, { color: t.text }]}>{transferType || 'Public'}</Text>
           </View>
 
+          <View style={[styles.divider, { backgroundColor: t.border }]} />
+
+          {/* To Address */}
           <View style={styles.detailRow}>
             <Text style={[styles.detailLabel, { color: t.textLight }]}>To Address</Text>
             <View style={styles.addressContainer}>
-              <Text style={[styles.addressFull, { color: t.text }]} numberOfLines={2} ellipsizeMode="middle">
-                {address}
+              <Text style={[styles.addressFull, { color: t.text }]} numberOfLines={1} ellipsizeMode="middle">
+                {truncateAddress(address)}
               </Text>
-              <Text style={[styles.addressShort, { color: t.textLight }]}>{truncateAddress(address)}</Text>
             </View>
           </View>
 
+          <View style={[styles.divider, { backgroundColor: t.border }]} />
+
+          {/* Network Fee */}
           <View style={styles.detailRow}>
             <Text style={[styles.detailLabel, { color: t.textLight }]}>Network Fee</Text>
-            <Text style={[styles.detailValue, { color: t.text }]}>≈ {estimatedFee.toFixed(6)} SOL</Text>
+            {isEvm ? (
+              <Text style={[styles.detailValue, { color: t.text }]}>≈ {estimatedFee.toFixed(4)} {evmGasSymbol}</Text>
+            ) : useKora ? (
+              <View style={styles.koraFeeRow}>
+                <Image source={require('../../assets/images/kora-logo.png')} style={styles.koraLogo} />
+                <Text style={[styles.koraFeeText, { color: t.text }]}>{estimatedFee.toFixed(6)} SOL</Text>
+              </View>
+            ) : (
+              <Text style={[styles.detailValue, { color: t.text }]}>≈ {estimatedFee.toFixed(6)} SOL</Text>
+            )}
           </View>
 
           <View style={[styles.totalBox, { backgroundColor: t.border }]}>
-            <Text style={[styles.totalLabel, { color: t.text }]}>Total</Text>
-            <Text style={[styles.totalValue, { color: t.text }]}>
-              {tokenSymbol === 'SOL'
-                ? `≈ ${(parseFloat(amountInSOL) + estimatedFee).toFixed(6)} SOL`
-                : `≈ ${parseFloat(amountInSOL).toFixed(6)} ${tokenSymbol} + ${estimatedFee.toFixed(6)} SOL`
-              }
-            </Text>
+            <View style={styles.totalRow}>
+              <Text style={[styles.totalLabel, { color: t.text }]}>Total</Text>
+              <Text style={[styles.totalValue, { color: t.text }]}>
+                {isEvm
+                  ? `≈ ${parseFloat(amountInSOL).toFixed(6)} ${tokenSymbol}`
+                  : tokenSymbol === 'SOL'
+                    ? `≈ ${(parseFloat(amountInSOL) + estimatedFee).toFixed(6)} SOL`
+                    : useKora
+                      ? `≈ ${parseFloat(amountInSOL).toFixed(6)} ${tokenSymbol}`
+                      : `≈ ${parseFloat(amountInSOL).toFixed(6)} ${tokenSymbol} + ${estimatedFee.toFixed(6)} SOL`
+                }
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -139,7 +178,8 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
 
       <View style={styles.footer}>
         {themeId === 'white' ? (
-          <TouchableOpacity style={[styles.sendButton, styles.sendButtonInner, { backgroundColor: t.text }]} onPress={handleSend}>
+          <TouchableOpacity style={[styles.sendButton, { backgroundColor: t.text }]} onPress={handleSend}>
+            <Ionicons name="arrow-up" size={20} color={t.background} />
             <Text style={[styles.sendButtonText, { color: t.background }]}>Send</Text>
           </TouchableOpacity>
         ) : (
@@ -150,6 +190,7 @@ const SendDetailsScreen: React.FC<SendDetailsScreenProps> = ({ navigation, route
             end={{ x: 1, y: 1 }}
           >
             <TouchableOpacity style={styles.sendButtonInner} onPress={handleSend}>
+              <Ionicons name="arrow-up" size={20} color={t.btnText} />
               <Text style={[styles.sendButtonText, { color: t.btnText }]}>Send</Text>
             </TouchableOpacity>
           </LinearGradient>
@@ -211,21 +252,27 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 14,
   },
   detailLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.gray,
-    marginBottom: 8,
   },
   detailValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: colors.black,
   },
+  divider: {
+    height: 1,
+    backgroundColor: colors.lightGray,
+  },
   addressContainer: {
-    gap: 4,
+    alignItems: 'flex-end',
   },
   addressFull: {
     fontSize: 14,
@@ -233,10 +280,18 @@ const styles = StyleSheet.create({
     color: colors.black,
     fontFamily: 'sans-serif',
   },
-  addressShort: {
-    fontSize: 12,
-    color: colors.gray,
-    fontFamily: 'sans-serif',
+  koraFeeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  koraLogo: {
+    width: 16,
+    height: 16,
+    marginRight: 6,
+  },
+  koraFeeText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   totalBox: {
     borderRadius: 14,
@@ -244,15 +299,19 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 8,
   },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   totalLabel: {
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1.2,
     color: colors.black,
-    marginBottom: 6,
   },
   totalValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: colors.black,
   },
@@ -279,16 +338,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sendButtonInner: {
     paddingVertical: 18,
-    alignItems: 'center',
     width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sendButtonText: {
     color: colors.white,
     fontSize: 18,
     fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
 

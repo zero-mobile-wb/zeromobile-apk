@@ -23,6 +23,8 @@ export interface SelectableToken {
   decimals?: number;
   logoURI?: string;
   chainId?: number;
+  chain?: string;
+  chainLogo?: string;
 }
 
 interface TokenSelectorModalProps {

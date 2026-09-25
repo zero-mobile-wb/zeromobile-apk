@@ -94,10 +94,22 @@ export default {
             solLogoUrl: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
             shadowIdStatusUrl: "https://shadow.radr.fun/shadowpay/shadowid/v1/id/status",
             rpcFallbackUrl: "https://api.mainnet-beta.solana.com",
+            kora: {
+                rpcUrl: "https://kora-pay.pxxlspace.cv/",
+                feePayerAddress: "HeaqgYh7oC4n7VWEmgkxSVmHM4NL8B6qBowBpRSE8itW",
+                usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            },
             deloraApiKey: "ppk_7d62d7c7a197a344f6a7d58e348174c08fed40290282d00553c7b33f6d5a4c00",
             eas: {
                 projectId: "b16d98b7-d951-4210-82ed-29f196ce1d4e"
-            }
+            },
+            evmRpc: {
+                ethereum: "https://eth-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2",
+                base: "https://base-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2",
+                polygon: "https://polygon-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2",
+                arbitrum: "https://arb-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2",
+                bsc: "https://bsc-dataseed.binance.org",
+            },
         }
     }
 };

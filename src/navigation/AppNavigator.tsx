@@ -102,6 +102,7 @@ import SpendOtpScreen from '../zerospend/screens/OtpScreen';
 import SpendPasswordScreen from '../zerospend/screens/PasswordScreen';
 import SpendLinkAccountScreen from '../zerospend/screens/LinkAccountScreen';
 import SpendLoginScreen from '../zerospend/screens/LoginScreen';
+import SpendForgotPasswordScreen from '../zerospend/screens/ForgotPasswordScreen';
 import SpendDashboardScreen from '../zerospend/screens/DashboardScreen';
 import SpendActionsScreen from '../zerospend/screens/SpendActionsScreen';
 import SpendTransactionsScreen from '../zerospend/screens/SpendTransactionsScreen';
@@ -177,6 +178,7 @@ const AppNavigatorContent: React.FC = () => {
         <Stack.Screen name="SpendPassword" component={SpendPasswordScreen} />
         <Stack.Screen name="SpendLinkAccount" component={SpendLinkAccountScreen} />
         <Stack.Screen name="SpendLogin" component={SpendLoginScreen} />
+        <Stack.Screen name="SpendForgotPassword" component={SpendForgotPasswordScreen} />
         <Stack.Screen name="SpendDashboard" component={SpendDashboardScreen} />
         <Stack.Screen name="SpendActions" component={SpendActionsScreen} />
         <Stack.Screen name="SpendTransactions" component={SpendTransactionsScreen} />

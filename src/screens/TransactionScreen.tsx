@@ -15,13 +15,25 @@ import { useNetwork } from '../context/NetworkContext';
 import { RootStackParamList } from '../types/navigation';
 import WavyDotsLoader from '../components/WavyDotsLoader';
 import AnimatedCheckmark from '../components/AnimatedCheckmark';
-import { sendSOL, sendSPLToken } from '../services/transactionService';
+import { sendSOL, sendSPLToken, sendSPLTokenViaKora, hasEnoughSolForGas } from '../services/transactionService';
 import { CLOAK_PROGRAM_ID, NATIVE_SOL_MINT, createUtxo, createZeroUtxo, fullWithdraw, generateUtxoKeypair, getNkFromUtxoPrivateKey, transact } from '@cloak.dev/sdk';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { usePrivy, useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
+import { sendEvmToken, getEvmGasBalance } from '../services/evmTransferService';
+import { CHAINS, deriveEvmPrivateKey, type ChainId } from '../services/chainService';
 
 // Backend URL — read from app.config.js extra (same as rest of the app)
 const BACKEND_URL = ((Constants.expoConfig?.extra?.backendUrl as string) || 'https://zeroserver.pxxl.click').replace(/\/$/, '');
+
+function truncateError(msg: string): string {
+  if (!msg) return 'Something went wrong.';
+  if (msg.includes('insufficient funds')) return 'Insufficient funds for this transaction';
+  if (msg.includes('user rejected')) return 'Transaction rejected by user';
+  if (msg.includes('network')) return 'Network error. Please try again.';
+  if (msg.includes('nonce')) return 'Nonce error. Please try again.';
+  const clean = msg.split('\n')[0].replace(/^Error:\s*/, '').replace(/\s*\{.*$/, '').trim();
+  return clean.length > 80 ? clean.slice(0, 77) + '...' : clean;
+}
 
 interface TransactionScreenProps {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transaction'>;
@@ -35,25 +47,29 @@ interface TransactionScreenProps {
       tokenDecimals: number;
       status: 'submitting' | 'success' | 'error';
       transferType?: 'Public' | 'Private';
+      chain?: string;
     };
   };
 }
 
 const TransactionScreen: React.FC<TransactionScreenProps> = ({ navigation, route }) => {
   const { currentTheme: t, themeId } = useTheme();
-  const { wallet, connection } = useWallet();
+  const { wallet, connection, evmWallets, exportEvmPrivateKey } = useWallet();
   const { network } = useNetwork();
   const rpcUrl = network === 'devnet'
     ? 'https://api.devnet.solana.com'
     : (connection.rpcEndpoint || 'https://api.mainnet-beta.solana.com');
-  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals, status: initialStatus, transferType } = route.params;
+  const { amount, amountInSOL, address, tokenMint, tokenSymbol, tokenDecimals, status: initialStatus, transferType, chain } = route.params;
+  const isEvm = chain && chain !== 'solana';
   const [status, setStatus] = useState<'submitting' | 'success' | 'error'>(initialStatus);
   const [signature, setSignature] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   const { user } = usePrivy();
   const privySolanaWallet = useEmbeddedSolanaWallet();
+  const privyEthWallet = useEmbeddedEthereumWallet();
   const privySolanaAddress = (privySolanaWallet.wallets?.[0] as any)?.address ?? null;
+  const privyEvmAddress = (privyEthWallet.wallets?.[0] as any)?.address ?? null;
   const isPrivyUser = !!user && !!privySolanaAddress;
 
 
@@ -73,6 +89,92 @@ const TransactionScreen: React.FC<TransactionScreenProps> = ({ navigation, route
             sender = { type: 'keypair', keypair: wallet };
           } else {
             throw new Error("No wallet connected.");
+          }
+
+          // EVM Transfer
+          if (isEvm) {
+            const chainConfig = CHAINS[chain as keyof typeof CHAINS];
+            if (!chainConfig) throw new Error(`Unknown chain: ${chain}`);
+
+            const evmWallet = evmWallets.find(w => w.chainId === chain);
+            const evmAddress = evmWallet?.address || (isPrivyUser && privyEvmAddress ? privyEvmAddress as `0x${string}` : undefined);
+            if (!evmAddress) throw new Error(`No ${chain} wallet found. Please add it in Settings.`);
+
+            const isNative = tokenMint === chain;
+            const decimals = isNative ? chainConfig.decimals : tokenDecimals;
+            const amountNum = parseFloat(amountInSOL);
+
+            let privateKey: `0x${string}` | undefined;
+            try {
+              const pk = await exportEvmPrivateKey(chain as ChainId);
+              if (pk) privateKey = pk as `0x${string}`;
+            } catch {}
+
+            const evmChainIdMap: Record<string, number> = { ethereum: 1, base: 8453, polygon: 137, arbitrum: 42161, monad: 143, arc: 5042 };
+            const evmChainId = evmChainIdMap[chain] || 0;
+
+            if (isNative) {
+              // Native ETH/MON/POL/USDC transfer via viem
+              const { createWalletClient, parseUnits, parseEther } = await import('viem');
+              const { privateKeyToAccount } = await import('viem/accounts');
+              const valueHex = chainConfig.decimals === 18
+                ? `0x${parseEther(String(amountNum)).toString(16)}`
+                : `0x${parseUnits(String(amountNum), chainConfig.decimals).toString(16)}`;
+              if (privateKey) {
+                const account = privateKeyToAccount(privateKey);
+                for (const url of chainConfig.rpcUrls) {
+                  try {
+                    const walletClient = createWalletClient({ account, transport: (await import('viem')).http(url, { timeout: 15000 }) });
+                    const hash = await walletClient.sendTransaction({ to: address as `0x${string}`, value: BigInt(valueHex), chain: null });
+                    setSignature(hash);
+                    setStatus('success');
+                    return;
+                  } catch {}
+                }
+                throw new Error('Native EVM transfer failed on all RPCs');
+              } else if (isPrivyUser && privyEthWallet?.wallets?.[0]) {
+                const ethProvider = await privyEthWallet.wallets[0].getProvider();
+                // Switch chain before sending
+                const chainIdHex = `0x${evmChainId.toString(16)}`;
+                try {
+                  await ethProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
+                } catch {}
+                const tx = { from: evmAddress, to: address, value: valueHex };
+                const hash = await ethProvider.request({ method: 'eth_sendTransaction', params: [tx] });
+                setSignature(typeof hash === 'string' ? hash : hash?.hash);
+                setStatus('success');
+                return;
+              }
+              throw new Error('No private key available for native EVM transfer');
+            }
+
+            // ERC-20 transfer
+            let evmSender: any;
+            if (privateKey) {
+              evmSender = { type: 'keypair', privateKey };
+            } else if (isPrivyUser && privyEthWallet?.wallets?.[0]) {
+              const ethProvider = await privyEthWallet.wallets[0].getProvider();
+              const chainIdHex = `0x${evmChainId.toString(16)}`;
+              try {
+                await ethProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
+              } catch {}
+              evmSender = { type: 'privy', provider: ethProvider, address: evmAddress };
+            } else {
+              throw new Error('No EVM wallet provider available');
+            }
+            const transferResult = await sendEvmToken({
+              rpcUrls: chainConfig.rpcUrls,
+              evmChainId,
+              token: tokenMint as `0x${string}`,
+              decimals,
+              amount: amountNum,
+              to: address as `0x${string}`,
+              sender: evmSender,
+            });
+            if (!transferResult.success) throw new Error(transferResult.error);
+            setSignature(transferResult.signature || '');
+            setStatus('success');
+            return;
           }
 
           if (transferType === 'Private') {
@@ -117,15 +219,29 @@ const TransactionScreen: React.FC<TransactionScreenProps> = ({ navigation, route
                 parseFloat(amountInSOL)
               );
             } else {
-              // Send SPL Token
-              result = await sendSPLToken(
-                connection,
-                sender,
-                address,
-                tokenMint,
-                parseFloat(amountInSOL),
-                tokenDecimals
-              );
+              // Send SPL Token — try normal flow, fallback to Kora if no SOL for gas
+              const senderPubkey = sender.type === 'keypair' ? sender.keypair.publicKey : sender.publicKey;
+              const hasSol = await hasEnoughSolForGas(connection, senderPubkey.toBase58());
+              if (hasSol) {
+                result = await sendSPLToken(
+                  connection,
+                  sender,
+                  address,
+                  tokenMint,
+                  parseFloat(amountInSOL),
+                  tokenDecimals
+                );
+              } else {
+                console.log('[Transaction] No SOL for gas, using Kora gasless relay');
+                result = await sendSPLTokenViaKora(
+                  connection,
+                  sender,
+                  address,
+                  tokenMint,
+                  parseFloat(amountInSOL),
+                  tokenDecimals
+                );
+              }
             }
           }
 
@@ -134,12 +250,12 @@ const TransactionScreen: React.FC<TransactionScreenProps> = ({ navigation, route
             setStatus('success');
           } else {
             const error = result.error || 'Transaction failed';
-            setErrorMessage(error);
+            setErrorMessage(truncateError(error));
             setStatus('error');
           }
         } catch (error: any) {
           console.error('Transaction error:', error);
-          setErrorMessage(error.message || 'Transaction failed');
+          setErrorMessage(truncateError(error.message || 'Transaction failed'));
           setStatus('error');
         }
       }
@@ -226,8 +342,12 @@ const TransactionScreen: React.FC<TransactionScreenProps> = ({ navigation, route
           {status === 'error' && (
             <>
               <Text style={[styles.statusTitle, { color: t.text }]}>Transaction Failed</Text>
-              <Text style={[styles.statusSubtitle, { color: t.textLight }]}>
-                {errorMessage || 'Something went wrong. Please try again.'}
+              <Text
+                style={[styles.statusSubtitle, { color: t.textLight }]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
+                {errorMessage || 'Something went wrong.'}
               </Text>
             </>
           )}

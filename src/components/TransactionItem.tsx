@@ -7,16 +7,56 @@ import colors from '../constants/colors';
 import { HeliusTransaction } from '../services/heliusApi';
 
 export interface Transaction extends HeliusTransaction {
-  // Can extend if needed
+  chain?: string;
 }
 
-export const getTokenLogoUrl = (tokenAddress: string | undefined): string => {
-  const solLogoUrl = Constants.expoConfig?.extra?.solLogoUrl || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
-  if (!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') {
-    return solLogoUrl;
-  }
-  return `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${tokenAddress}/logo.png`;
+const TOKEN_LOGOS: Record<string, string> = {
+  'ETH': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+  'POL': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png',
+  'MATIC': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png',
+  'BNB': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png',
+  'ARB': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png',
+  // Generic USDC/USDT fallback (Solana/generic)
+  'USDC': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+  'USDT': 'https://assets.coingecko.com/coins/images/325/small/Tether.png',
 };
+
+const CHAIN_LOGOS: Record<string, string> = {
+  'ethereum': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+  'base': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png',
+  'polygon': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png',
+  'arbitrum': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png',
+  'bsc': 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png',
+  'arc': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+};
+
+// For USDC/USDT we show the chain logo so the user can immediately see which network.
+// For other EVM tokens (ETH, MATIC, etc.) we show the token logo directly.
+const STABLECOIN_SYMBOLS = new Set(['USDC', 'USDT', 'USDS', 'EURC']);
+
+const SOL_LOGO = 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
+
+function getLogo(item: Transaction): string | undefined {
+  if (!item.chain || item.chain === 'solana') {
+    if (!item.tokenAddress || item.tokenAddress === 'So11111111111111111111111111111111111111112') return SOL_LOGO;
+    return `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${item.tokenAddress}/logo.png`;
+  }
+
+  const token = (item.token || '').toUpperCase();
+  const chain = (item.chain || '').toLowerCase();
+
+  // For stablecoins — show the chain logo so it's clear which network this is
+  if (STABLECOIN_SYMBOLS.has(token)) {
+    return CHAIN_LOGOS[chain] ?? TOKEN_LOGOS[token];
+  }
+
+  // For native gas tokens — show the chain logo
+  if (token === 'ETH' || token === 'POL' || token === 'MATIC' || token === 'BNB') {
+    return CHAIN_LOGOS[chain] ?? TOKEN_LOGOS[token];
+  }
+
+  return TOKEN_LOGOS[token] ?? CHAIN_LOGOS[chain];
+}
 
 export const formatTransactionTime = (timestamp: number) => {
   const now = Date.now() / 1000;
@@ -39,26 +79,30 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ item }) => {
   const [imageError, setImageError] = useState(false);
   const { currentTheme } = useTheme();
 
+  const logoUrl = getLogo(item);
+  const tokenSymbol = item.token || 'SOL';
+  const chainName = item.chain && item.chain !== 'solana'
+    ? item.chain.charAt(0).toUpperCase() + item.chain.slice(1)
+    : null;
+
   return (
     <View style={styles.activityItem}>
       <View style={styles.activityIconContainer}>
-        {/* Token Logo */}
         <View style={[styles.tokenLogoContainer, { backgroundColor: currentTheme.card, borderColor: currentTheme.border }]}>
-          {!imageError ? (
+          {!imageError && logoUrl ? (
             <Image
-              source={{ uri: getTokenLogoUrl(item.tokenAddress) }}
+              source={{ uri: logoUrl }}
               style={styles.tokenLogo}
               onError={() => setImageError(true)}
             />
           ) : (
             <View style={[styles.tokenLogoFallback, { backgroundColor: currentTheme.border }]}>
               <Text style={[styles.tokenLogoFallbackText, { color: currentTheme.text }]}>
-                {(item.token || 'SOL')[0]}
+                {tokenSymbol[0]}
               </Text>
             </View>
           )}
         </View>
-        {/* Direction indicator badge */}
         <View style={[
           styles.directionBadge,
           { borderColor: currentTheme.primary },
@@ -72,8 +116,12 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ item }) => {
         </View>
       </View>
       <View style={styles.activityDetails}>
-        <Text style={[styles.activityTitle, { color: currentTheme.text }]}>{item.type === 'receive' ? 'Received' : 'Sent'}</Text>
-        <Text style={[styles.activityTime, { color: currentTheme.textLight }]}>{formatTransactionTime(item.timestamp)}</Text>
+        <Text style={[styles.activityTitle, { color: currentTheme.text }]}>
+          {item.type === 'receive' ? 'Received' : 'Sent'} {tokenSymbol}
+        </Text>
+        <Text style={[styles.activityTime, { color: currentTheme.textLight }]}>
+          {formatTransactionTime(item.timestamp)}{chainName ? ` · ${chainName}` : ''}
+        </Text>
       </View>
       <View style={styles.activityAmount}>
         <Text style={[styles.amountText, { color: currentTheme.text }]}>
@@ -130,10 +178,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   receiveBadge: {
-    backgroundColor: '#10B981', // Green
+    backgroundColor: '#10B981',
   },
   sendBadge: {
-    backgroundColor: '#EF4444', // Red
+    backgroundColor: '#EF4444',
   },
   activityDetails: {
     flex: 1,

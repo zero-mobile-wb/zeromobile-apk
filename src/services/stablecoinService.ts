@@ -7,11 +7,13 @@ const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ
 const ERC20_ABI = erc20Abi;
 
 const EVM_RPC_URLS: Record<string, string[]> = {
-  base: ['https://mainnet.base.org', 'https://base.publicnode.com'],
+  ethereum: ['https://eth-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2', 'https://ethereum.publicnode.com'],
+  base: ['https://base-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2', 'https://mainnet.base.org'],
   bsc: ['https://bsc-dataseed.binance.org', 'https://bsc.publicnode.com'],
-  arbitrum: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum.publicnode.com'],
-  polygon: ['https://polygon-rpc.com', 'https://polygon.publicnode.com'],
+  arbitrum: ['https://arb-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2', 'https://arb1.arbitrum.io/rpc'],
+  polygon: ['https://polygon-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2', 'https://polygon-rpc.com'],
   monad: ['https://testnet-rpc.monad.xyz'],
+  arc: ['https://rpc.mainnet.arc.io'],
 };
 
 export interface ChainBalance {
@@ -103,7 +105,10 @@ export async function getStablecoinBalances(
         const pubkey = new PublicKey(solanaAddress);
         balance = await fetchSolanaTokenBalance(connection, pubkey, chain.contractAddress);
       } else if (chain.evmChainId && evmWallets.length > 0) {
-        const matchingWallet = evmWallets[0];
+        const matchingWallet = evmWallets.find(w => {
+          const id = w.chainId.toLowerCase();
+          return id === chain.id.toLowerCase() || id === chain.evmChainId?.toString();
+        }) || evmWallets[0];
         if (matchingWallet) {
           balance = await fetchEvmTokenBalance(
             matchingWallet.address,

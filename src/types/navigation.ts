@@ -15,6 +15,7 @@ export type RootStackParamList = {
     tokenSymbol: string;
     tokenDecimals: number;
     transferType?: 'Public' | 'Private';
+    chain?: string;
   };
   SendDetails: {
     amount: string;
@@ -24,6 +25,7 @@ export type RootStackParamList = {
     tokenSymbol: string;
     tokenDecimals: number;
     transferType?: 'Public' | 'Private';
+    chain?: string;
   };
   Transaction: {
     amount: string;
@@ -34,6 +36,7 @@ export type RootStackParamList = {
     tokenDecimals: number;
     status: 'submitting' | 'success' | 'error';
     transferType?: 'Public' | 'Private';
+    chain?: string;
   };
   Receive: undefined;
   Onramp: undefined;
@@ -50,6 +53,7 @@ export type RootStackParamList = {
   Tokens: undefined;
   SpendEmail: undefined;
   SpendLogin: { email?: string } | undefined;
+  SpendForgotPassword: undefined;
   SpendOtp: { email: string };
   SpendPassword: { email: string; otp: string };
   SpendLinkAccount: undefined;

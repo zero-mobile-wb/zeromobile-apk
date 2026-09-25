@@ -31,6 +31,7 @@ interface EnterAddressScreenProps {
       tokenSymbol: string;
       tokenDecimals: number;
       transferType?: 'Public' | 'Private';
+      chain?: string;
     };
   };
 }
@@ -41,7 +42,7 @@ const EnterAddressScreen: React.FC<EnterAddressScreenProps> = ({ navigation, rou
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const { currentTheme: t, themeId } = useTheme();
   const { wallet } = useWallet();
-  const { amount, amountInSOL, tokenMint, tokenSymbol, tokenDecimals, transferType } = route.params;
+  const { amount, amountInSOL, tokenMint, tokenSymbol, tokenDecimals, transferType, chain } = route.params;
 
   // Camera State
   const [isScanning, setIsScanning] = useState(false);
@@ -56,8 +57,11 @@ const EnterAddressScreen: React.FC<EnterAddressScreenProps> = ({ navigation, rou
   };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    // Solana URIs can be solana:<address>
-    const scannedAddress = data.replace('solana:', '').split('?')[0];
+    // Handle both Solana URIs and EVM addresses
+    let scannedAddress = data.replace('solana:', '').split('?')[0];
+    if (!scannedAddress.startsWith('0x') && scannedAddress.startsWith('ethereum:')) {
+      scannedAddress = scannedAddress.replace('ethereum:', '');
+    }
     setAddress(scannedAddress);
     setIsScanning(false);
   };
@@ -71,7 +75,12 @@ const EnterAddressScreen: React.FC<EnterAddressScreenProps> = ({ navigation, rou
   useEffect(() => {
     const trimmed = address.trim();
     if (trimmed) {
-      setIsValid(isValidSolanaAddress(trimmed));
+      const isEvm = chain && chain !== 'solana';
+      if (isEvm) {
+        setIsValid(/^0x[0-9a-fA-F]{40}$/.test(trimmed));
+      } else {
+        setIsValid(isValidSolanaAddress(trimmed));
+      }
     } else {
       setIsValid(false);
     }
@@ -108,7 +117,8 @@ const EnterAddressScreen: React.FC<EnterAddressScreenProps> = ({ navigation, rou
       tokenMint,
       tokenSymbol,
       tokenDecimals,
-      transferType
+      transferType,
+      chain,
     });
   };
 
@@ -155,7 +165,7 @@ const EnterAddressScreen: React.FC<EnterAddressScreenProps> = ({ navigation, rou
               style={[styles.input, { color: t.text, backgroundColor: t.card, borderColor: t.border, paddingRight: 80 }]}
               value={address}
               onChangeText={setAddress}
-              placeholder="Enter Solana wallet address"
+              placeholder={chain && chain !== 'solana' ? `Enter ${chain} wallet address` : "Enter Solana wallet address"}
               placeholderTextColor={t.textLight}
               autoCapitalize="none"
               autoCorrect={false}

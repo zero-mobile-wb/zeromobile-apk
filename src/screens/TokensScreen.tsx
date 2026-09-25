@@ -158,7 +158,7 @@ const TokensScreen: React.FC<TokensScreenProps> = ({ navigation }) => {
           };
         });
 
-        // Unified list: SOL first, then stablecoins, then other tokens, then EVM
+        // Unified list: SOL first, then stablecoins, then other SPL tokens, then EVM
         setTokens([solToken, ...enrichedScTokens, ...splTokens, ...evmTokens]);
         setTotalValue(walletBalance.totalUSD);
       } catch (error) {

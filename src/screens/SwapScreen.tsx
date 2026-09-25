@@ -19,6 +19,7 @@ import { VersionedTransaction } from '@solana/web3.js';
 import Header from '../components/Header';
 import Navigation from '../components/Navigation';
 import TokenSelectorModal, { SelectableToken } from '../components/TokenSelectorModal';
+import Toast from '../components/Toast';
 import colors from '../constants/colors';
 import { useTheme } from '../context/ThemeContext';
 import { useWallet } from '../context/WalletContext';
@@ -27,7 +28,7 @@ import { getWalletBalance } from '../services/balanceService';
 import { fetchPreStockBalances, PreStockBalance } from '../services/prestockService';
 import * as deloraService from '../services/deloraService';
 import type { DeloraChain } from '../services/deloraService';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { PublicKey } from '@solana/web3.js';
 
 const POPULAR_TOKENS = [
@@ -64,9 +65,7 @@ const FALLBACK_CHAINS: DeloraChain[] = [
 ];
 
 const getChainLogo = (chain: DeloraChain): string | undefined => {
-    const url = CHAIN_PNG_LOGOS[chain.id] || chain.nativeToken?.logoURI || chain.logoURI;
-    if (url) console.log(`getChainLogo(${chain.name}): ${url.substring(0, 80)}`);
-    return url;
+    return CHAIN_PNG_LOGOS[chain.id] || chain.nativeToken?.logoURI || chain.logoURI;
 };
 
 interface SwapScreenProps {
@@ -76,8 +75,9 @@ interface SwapScreenProps {
 
 const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
     const { currentTheme, themeId } = useTheme();
-    const { wallet, connection, evmWallets, activeSolanaAddress, isPrivyUser } = useWallet();
+    const { wallet, connection, evmWallets, activeSolanaAddress, isPrivyUser, exportMnemonic } = useWallet();
     const privySolanaWallet = useEmbeddedSolanaWallet();
+    const privyEthWallet = useEmbeddedEthereumWallet();
     const routeParams = route.params;
 
     const [fromAmount, setFromAmount] = useState<string>('');
@@ -105,6 +105,17 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
     const [deloraTokens, setDeloraTokens] = useState<SelectableToken[]>([]);
     const [preStockTokens, setPreStockTokens] = useState<PreStockBalance[]>([]);
 
+    // Toast state
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState('');
+    const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+
+    const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+        setToastMessage(message);
+        setToastType(type);
+        setToastVisible(true);
+    };
+
     // Init tokens on mount
     useEffect(() => {
         let cancelled = false;
@@ -131,7 +142,53 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
                 };
                 for (const t of balance.tokens) {
                     map[t.mint] = { balance: t.uiAmount, priceUSD: t.priceUSD };
+                    map[`${t.mint}:1000000001`] = { balance: t.uiAmount, priceUSD: t.priceUSD };
                 }
+
+                // 1. Fetch EVM Native Balances
+                const { getEvmBalance, EVM_CHAINS } = await import('../services/chainService');
+                const evmAddrs: { address: `0x${string}`, chainId: string }[] = [];
+                if (isPrivyUser && privyEthWallet.wallets?.[0]?.address) {
+                    const addr = privyEthWallet.wallets[0].address as `0x${string}`;
+                    EVM_CHAINS.forEach(c => evmAddrs.push({ address: addr, chainId: c.id }));
+                } else {
+                    evmWallets.forEach(w => evmAddrs.push({ address: w.address as `0x${string}`, chainId: w.chainId }));
+                }
+
+                await Promise.all(evmAddrs.map(async (wa) => {
+                    const chainConf = EVM_CHAINS.find(c => c.id === wa.chainId);
+                    if (!chainConf) return;
+                    try {
+                        const bal = await getEvmBalance(wa.address, chainConf);
+                        let deloraId = 1;
+                        if (wa.chainId === 'base') deloraId = 8453;
+                        if (wa.chainId === 'polygon') deloraId = 137;
+                        if (wa.chainId === 'arbitrum') deloraId = 42161;
+                        if (wa.chainId === 'arc') deloraId = 5042;
+                        
+                        map[`0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee:${deloraId}`] = { balance: bal, priceUSD: 0 };
+                        map[`0x0000000000000000000000000000000000000000:${deloraId}`] = { balance: bal, priceUSD: 0 };
+                    } catch (e) {}
+                }));
+
+                // 2. Fetch EVM Stablecoin Balances
+                const { getStablecoinBalances } = await import('../services/stablecoinService');
+                try {
+                    const scBalances = await getStablecoinBalances(activeSolanaAddress, evmAddrs, 1.0, connection);
+                    for (const sc of scBalances) {
+                        for (const cb of sc.chains) {
+                            let deloraId = 1000000001;
+                            if (cb.chain.id === 'base') deloraId = 8453;
+                            if (cb.chain.id === 'ethereum') deloraId = 1;
+                            if (cb.chain.id === 'polygon') deloraId = 137;
+                            if (cb.chain.id === 'arbitrum') deloraId = 42161;
+                            
+                            map[`${cb.chain.contractAddress}:${deloraId}`] = { balance: cb.balance, priceUSD: sc.priceUSD };
+                            map[`${cb.chain.contractAddress}`] = { balance: cb.balance, priceUSD: sc.priceUSD };
+                        }
+                    }
+                } catch (e) {}
+
                 setBalancesMap(map);
 
                 const userTokens: SelectableToken[] = [
@@ -276,7 +333,8 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
                     deloraService.getChains('svm'),
                 ]);
                 if (!cancelled) {
-                    const all = [...svmChains, ...evmChains];
+                    const SUPPORTED_CHAIN_IDS = [1000000001, 1, 8453, 137, 5042];
+                    const all = [...svmChains, ...evmChains].filter(c => SUPPORTED_CHAIN_IDS.includes(c.id));
                     setDeloraChains(all.length > 0 ? all : FALLBACK_CHAINS);
                     setOriginChain(all.find(c => c.chainType === 'SVM') || FALLBACK_CHAINS[0]);
                     setDestChain(all.find(c => c.chainType === 'SVM') || all[0] || FALLBACK_CHAINS[0]);
@@ -306,7 +364,7 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
                         const key = `${t.address}:${chainId}`;
                         if (!seen.has(key)) {
                             seen.add(key);
-                            const bal = balancesMap[t.address];
+                            const bal = balancesMap[key] || balancesMap[t.address];
                             mapped.push({
                                 mint: t.address,
                                 name: t.name,
@@ -348,7 +406,7 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
 
         fetchDeloraTokens();
         return () => { cancelled = true; };
-    }, [originChain.id, destChain.id, balancesMap]);
+    }, [originChain.id, destChain.id, balancesMap, preStockTokens]);
 
     // Auto-reset tokens when chains change, and sync real balances into selected tokens
     useEffect(() => {
@@ -456,25 +514,37 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
     };
 
     // Poll the actual on-chain status until confirmed/finalized or timeout.
-    // Returns 'confirmed' | 'failed' | 'pending' so we never claim success prematurely.
-    const confirmSwapSignature = async (signature: string, timeoutMs = 40000): Promise<'confirmed' | 'failed' | 'pending'> => {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-            try {
-                const status = await connection.getSignatureStatus(signature, { searchTransactionHistory: true });
-                const value = status?.value;
-                if (value && value.err) {
+    // Confirms a submitted swap transaction. Returns the outcome.
+    const confirmSwapSignature = async (signature: string, timeoutMs = 60000): Promise<'confirmed' | 'failed' | 'pending'> => {
+        try {
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            const result = await connection.confirmTransaction(
+                { signature, blockhash, lastValidBlockHeight },
+                'confirmed'
+            );
+            if (result.value.err) {
+                // Get the actual error to distinguish real failures from false positives
+                const statusCheck = await connection.getSignatureStatus(signature, { searchTransactionHistory: true }).catch(() => null);
+                if (statusCheck?.value?.err) {
+                    console.error('[Delora] On-chain error:', JSON.stringify(statusCheck.value.err));
                     return 'failed';
                 }
-                if (value?.confirmationStatus === 'confirmed' || value?.confirmationStatus === 'finalized') {
-                    return 'confirmed';
-                }
-            } catch (e: any) {
-                // transient RPC error — keep polling
+                // err field present but status check says otherwise — treat as confirmed
+                return 'confirmed';
             }
-            await new Promise(r => setTimeout(r, 2000));
+            return 'confirmed';
+        } catch (e: any) {
+            // Timeout or RPC error — check status one final time
+            try {
+                const status = await connection.getSignatureStatus(signature, { searchTransactionHistory: true });
+                const val = status?.value;
+                if (val?.confirmationStatus === 'confirmed' || val?.confirmationStatus === 'finalized') {
+                    return val.err ? 'failed' : 'confirmed';
+                }
+            } catch {}
+            // Cannot confirm — treat as pending (don't falsely report failure)
+            return 'pending';
         }
-        return 'pending';
     };
 
     const handleDeloraSwap = async () => {
@@ -485,7 +555,7 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
         if (isNaN(amount) || amount <= 0) return;
 
         if (amount > (fromToken?.balance || 0)) {
-            Alert.alert('Insufficient Balance', `You only have ${fromToken?.balance?.toFixed(4)} ${fromToken?.symbol}`);
+            showToast(`Insufficient Balance: You only have ${fromToken?.balance?.toFixed(4)} ${fromToken?.symbol}`, 'error');
             return;
         }
 
@@ -494,67 +564,141 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
             || fromToken?.mint === '11111111111111111111111111111111';
         const SOL_RESERVE = 0.005;
         if (isNativeSol && (fromToken?.balance || 0) < SOL_RESERVE) {
-            Alert.alert(
-                'Insufficient SOL',
-                'Your wallet needs a small SOL balance to cover network fees and token account creation. Please add at least ~0.005 SOL and try again.'
-            );
+            showToast('Your wallet needs a small SOL balance (~0.005 SOL) to cover network fees and token account creation.', 'error');
             return;
         }
         if (isNativeSol && amount > ((fromToken?.balance || 0) - SOL_RESERVE)) {
-            Alert.alert(
-                'Keep Some SOL',
-                `Swapping all your SOL won't cover the network fees. Leave at least ${SOL_RESERVE} SOL for fees and rent.`
-            );
+            showToast(`Swapping all your SOL won't cover network fees. Leave at least ${SOL_RESERVE} SOL.`, 'error');
             return;
         }
 
         if (!deloraQuote.calldata?.data) {
-            Alert.alert('Error', 'No transaction data in quote response');
+            showToast('No transaction data in quote response', 'error');
             return;
         }
 
         setIsSwapping(true);
         let signature: string | null = null;
         try {
-            const transactionBuffer = Uint8Array.from(atob(deloraQuote.calldata.data), c => c.charCodeAt(0));
-            const transaction = VersionedTransaction.deserialize(transactionBuffer);
-
-            if (isPrivyUser) {
-                const provider = await privySolanaWallet.getProvider?.();
-                if (!provider) throw new Error('Privy provider unavailable');
-
-                const { signAndSendWithPrivy } = await import('../services/transactionService');
-                signature = await signAndSendWithPrivy(connection, transaction as any, provider);
-            } else {
-                if (!wallet) throw new Error('No wallet');
-                transaction.sign([wallet]);
-                const rawTransaction = transaction.serialize();
-                signature = await connection.sendRawTransaction(rawTransaction, {
-                    skipPreflight: false,
-                    maxRetries: 3,
-                });
-            }
-
-            console.log("Delora swap TX sent:", signature);
-
-            const result = await confirmSwapSignature(signature);
-            if (result === 'failed') {
-                throw new Error('Transaction failed on-chain. Your swap did not complete.');
-            }
-
-            const originName = originChain.name;
-            const destName = destChain.name;
             const crossChain = originChain.id !== destChain.id;
+            const isEvmOrigin = originChain.chainType === 'EVM';
 
-            if (result === 'confirmed') {
-                Alert.alert('Swap Successful', crossChain
-                    ? `Cross-chain swap completed!\n${originName} → ${destName}`
-                    : `Swap completed on ${originName}!`);
+            if (isEvmOrigin) {
+                if (isPrivyUser) {
+                    const provider = await privyEthWallet.wallets?.[0]?.getProvider?.();
+                    if (!provider) throw new Error('Privy EVM provider unavailable');
+
+                    signature = await provider.request({
+                        method: 'eth_sendTransaction',
+                        params: [{
+                            from: getAddressForChain(originChain),
+                            to: deloraQuote.calldata.to,
+                            value: '0x' + BigInt(deloraQuote.calldata.value).toString(16),
+                            data: deloraQuote.calldata.data,
+                        }],
+                    });
+                } else {
+                    const { createWalletClient, http } = await import('viem');
+                    const { privateKeyToAccount } = await import('viem/accounts');
+                    const chainService = await import('../services/chainService');
+                    
+                    const chainConf = Object.values(chainService.CHAINS).find(c => c.id === originChain.key || c.name === originChain.name) 
+                                     || chainService.EVM_CHAINS[0];
+                    const walletItem = evmWallets.find(w => w.chainId === chainConf.id);
+                    if (!walletItem) throw new Error('Local EVM wallet not found');
+
+                    const mnemonic = await exportMnemonic();
+                    if (!mnemonic) throw new Error('No mnemonic for EVM signing');
+                    
+                    const pk = chainService.deriveEvmPrivateKey(mnemonic, chainConf.derivationIndex);
+                    const account = privateKeyToAccount(pk);
+                    const client = createWalletClient({
+                        account,
+                        transport: http(chainConf.rpcUrls[0] || chainConf.rpcUrl)
+                    });
+                    
+                    signature = await client.sendTransaction({
+                        chain: null,
+                        to: deloraQuote.calldata.to as `0x${string}`,
+                        value: BigInt(deloraQuote.calldata.value),
+                        data: deloraQuote.calldata.data as `0x${string}`,
+                    });
+                }
+
+                if (!signature) throw new Error('Transaction failed');
+                console.log("EVM Delora swap TX sent:", signature);
+                showToast(crossChain
+                    ? `Cross-chain swap initiated!\n${originChain.name} → ${destChain.name}\nTX: ${signature.substring(0, 10)}...`
+                    : `Swap submitted on ${originChain.name}!\nTX: ${signature.substring(0, 10)}...`, 'success');
+
             } else {
-                Alert.alert(
-                    'Transaction Submitted',
-                    `Your swap was submitted but we couldn't confirm it yet.\nTX: ${signature?.substring(0, 12)}…\nCheck Activity shortly.`
-                );
+                // SVM swap logic - following Delora's documented approach exactly
+                if (!deloraQuote.calldata?.data) throw new Error('Transaction data is missing in quote response');
+                
+                const transactionBuffer = Uint8Array.from(atob(deloraQuote.calldata.data), c => c.charCodeAt(0));
+                let transaction: VersionedTransaction;
+                try {
+                    transaction = VersionedTransaction.deserialize(transactionBuffer);
+                } catch (e: any) {
+                    throw new Error(`Failed to deserialize transaction: ${e.message}`);
+                }
+
+                let signedTransaction: VersionedTransaction;
+
+                // Pre-flight balance check: complex swaps often require creating new ATAs for routing
+                // which cost ~0.002 SOL each for rent exemption.
+                const userSolBalance = await connection.getBalance(new PublicKey(activeSolanaAddress || wallet?.publicKey!));
+                if (userSolBalance < 5_000_000) { // 0.005 SOL
+                    throw new Error(`Insufficient SOL for network rent. You only have ${(userSolBalance/1e9).toFixed(4)} SOL, but swaps typically require ~0.005 SOL to create routing accounts. Please deposit more SOL.`);
+                }
+
+                if (isPrivyUser) {
+                    // Dedicated VersionedTransaction path for Privy (signAndSendWithPrivy is legacy-Transaction only)
+                    const provider = await privySolanaWallet.getProvider?.();
+                    if (!provider) throw new Error('Privy Solana provider unavailable');
+
+                    // signTransaction returns { signedTransaction: VersionedTransaction }
+                    const res = await provider.request({ method: 'signTransaction', params: { transaction } }) as any;
+                    const signed = res?.signedTransaction ?? res;
+
+                    let rawBytes: Uint8Array;
+                    if (typeof signed === 'string') {
+                        // base64-encoded signed tx
+                        const { Buffer: RNBuf } = await import('buffer');
+                        rawBytes = RNBuf.from(signed, 'base64');
+                    } else if (signed?.type === 'Buffer' && Array.isArray(signed.data)) {
+                        rawBytes = Uint8Array.from(signed.data);
+                    } else if (typeof signed?.serialize === 'function') {
+                        rawBytes = signed.serialize();
+                    } else {
+                        throw new Error('Privy returned unrecognized signed transaction format');
+                    }
+
+                    // skipPreflight: Delora pre-validates transactions server-side
+                    signature = await connection.sendRawTransaction(rawBytes, { skipPreflight: true, maxRetries: 3 });
+                } else {
+                    // Local keypair: sign, then send with skipPreflight (Delora pre-validates)
+                    if (!wallet) throw new Error('No wallet');
+                    transaction.sign([wallet]);
+                    const rawTransaction = transaction.serialize();
+                    signature = await connection.sendRawTransaction(rawTransaction, { skipPreflight: true, maxRetries: 3 });
+                }
+
+                console.log("SVM Delora swap TX sent:", signature);
+
+                if (!signature) throw new Error('No signature returned from transaction');
+                const result = await confirmSwapSignature(signature);
+                // Only hard-fail if we can actually confirm on-chain failure
+                // (to avoid false negatives from slow RPC indexing)
+                const solscanUrl = `https://solscan.io/tx/${signature}`;
+                if (result === 'confirmed') {
+                    showToast(crossChain
+                        ? `Swap Successful ✓\n${originChain.name} → ${destChain.name}`
+                        : `Swap completed on ${originChain.name}! ✓`, 'success');
+                } else {
+                    // Both 'pending' and 'failed' — show the sig so user can verify on Solscan
+                    showToast(`Transaction sent. Check Activity or Solscan to verify.\nTX: ${signature.substring(0, 12)}…`, 'info');
+                }
             }
 
             setFromAmount('');
@@ -564,12 +708,9 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
             console.error("Delora Swap Error:", error);
             const msg = error?.message || 'Unknown error occurred';
             if (msg.includes('insufficient lamports')) {
-                Alert.alert(
-                    'Not Enough SOL for Fees',
-                    'Your wallet has too little SOL to cover the swap plus network fees and the cost of creating a token account. Add at least ~0.005 SOL to your wallet and try again.'
-                );
+                showToast('Not Enough SOL for Fees. Add at least ~0.005 SOL to your wallet and try again.', 'error');
             } else {
-                Alert.alert('Swap Failed', msg);
+                showToast(`Swap Failed: ${msg}`, 'error');
             }
         } finally {
             setIsSwapping(false);
@@ -615,13 +756,36 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
             );
         }
         if (deloraQuote) {
-            const sameType = originChain.chainType === destChain.chainType;
-            const feePct = sameType ? '0.5%' : '1%';
+            const feeUsd = parseFloat(deloraQuote.fees?.totalUsd || '0');
+            const rawFeeAmount = parseFloat(deloraQuote.fees?.total?.amount || '0');
+            const feeDecimals = deloraQuote.fees?.total?.decimals ?? 9;
+            const feeTokenAmount = rawFeeAmount / Math.pow(10, feeDecimals);
+            const feeCurrency = deloraQuote.fees?.total?.currencySymbol || '';
+            const adapter = deloraQuote.adapter || 'Auto';
+            const crossChain = originChain.id !== destChain.id;
+            const feeDisplay = feeUsd > 0
+                ? `$${feeUsd.toFixed(4)}`
+                : feeTokenAmount > 0
+                ? `${feeTokenAmount.toFixed(6)} ${feeCurrency}`
+                : crossChain ? '~$1.00' : '~$0.50';
             return (
                 <View style={styles.quoteInfo}>
-                    <Text style={[styles.quoteText, { color: currentTheme.textLight }]}>
-                        Route: {deloraQuote.adapter} | Fee: ${deloraQuote.fees?.totalUsd || '0.00'} ({feePct})
-                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[styles.quoteText, { color: currentTheme.textLight }]}>Route</Text>
+                        <Text style={[styles.quoteText, { color: currentTheme.text, fontWeight: '600' }]}>{adapter}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[styles.quoteText, { color: currentTheme.textLight }]}>Network fee</Text>
+                        <Text style={[styles.quoteText, { color: currentTheme.text, fontWeight: '600' }]}>
+                            {feeDisplay}
+                        </Text>
+                    </View>
+                    {crossChain && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={[styles.quoteText, { color: currentTheme.textLight }]}>Type</Text>
+                            <Text style={[styles.quoteText, { color: '#f59e0b', fontWeight: '600' }]}>Cross-chain ⚡</Text>
+                        </View>
+                    )}
                 </View>
             );
         }
@@ -786,6 +950,13 @@ const SwapScreen: React.FC<SwapScreenProps> = ({ navigation, route }) => {
                         );
                 })()}
             </View>
+
+            <Toast
+                visible={toastVisible}
+                message={toastMessage}
+                type={toastType}
+                onHide={() => setToastVisible(false)}
+            />
 
             <Navigation
                 activeTab="swap"

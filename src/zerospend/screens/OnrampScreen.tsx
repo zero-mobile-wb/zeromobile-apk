@@ -542,12 +542,17 @@ const OnrampScreen: React.FC<OnrampScreenProps> = ({ navigation }) => {
                             {/* Network section */}
                             <Text style={[styles.sheetSectionLabel, { color: currentTheme.textLight }]}>NETWORK</Text>
                             {SELL_CHAINS.filter(c => c.id !== 'bsc').map((chain) => {
-                                const active = tempChain.id === chain.id;
+                        const active = tempChain.id === chain.id;
                                 return (
                                     <TouchableOpacity
                                         key={chain.id}
-                                        style={[styles.sheetItem, active && { backgroundColor: currentTheme.border }]}
+                                        style={[
+                                            styles.sheetItem,
+                                            active && { backgroundColor: currentTheme.border },
+                                            chain.comingSoon && { opacity: 0.5 },
+                                        ]}
                                         onPress={() => {
+                                            if (chain.comingSoon) return;
                                             setTempChain(chain);
                                             if (!chain.tokens.find(t => t.symbol === tempToken.symbol)) {
                                                 setTempToken(chain.tokens[0]);
@@ -558,10 +563,15 @@ const OnrampScreen: React.FC<OnrampScreenProps> = ({ navigation }) => {
                                         <View style={{ flex: 1 }}>
                                             <Text style={[styles.sheetItemName, { color: currentTheme.text }]}>{chain.name}</Text>
                                             <Text style={[styles.sheetItemSub, { color: currentTheme.textLight }]}>
-                                                {chain.id === 'solana' ? 'Fast · low fees' : `Gas: ${chain.nativeSymbol}`}
+                                                {chain.comingSoon ? 'Coming soon' : chain.id === 'solana' ? 'Fast · low fees' : chain.nativeUSDC ? 'Native USDC' : `Gas: ${chain.nativeSymbol}`}
                                             </Text>
                                         </View>
-                                        {active && <Ionicons name="checkmark-circle" size={22} color={currentTheme.textLight} />}
+                                        {chain.comingSoon
+                                            ? <View style={{ backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Soon</Text>
+                                              </View>
+                                            : active && <Ionicons name="checkmark-circle" size={22} color={currentTheme.textLight} />
+                                        }
                                     </TouchableOpacity>
                                 );
                             })}

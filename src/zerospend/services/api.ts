@@ -112,6 +112,12 @@ export const spendApi = {
             type === 'nin' ? { nin: identifier } : { bvn: identifier },
             token
         ),
+    forgotPasswordSendOtp: (email: string) =>
+        request<{ success: boolean }>('/api/zerospend/auth/forgot-password/send-otp', 'POST', { email }),
+    forgotPasswordCheckOtp: (email: string, otp: string) =>
+        request<{ success: boolean }>('/api/zerospend/auth/forgot-password/check-otp', 'POST', { email, otp }),
+    forgotPasswordReset: (email: string, otp: string, newPassword: string) =>
+        request<{ success: boolean; token: string; user: any }>('/api/zerospend/auth/forgot-password/reset', 'POST', { email, otp, newPassword }),
     listEvents: (kind?: 'fundraiser' | 'regular') =>
         request<{ success: boolean; events: SpendEvent[] }>(
             `/api/zerospend/events/public${kind ? `?kind=${kind}` : ''}`,

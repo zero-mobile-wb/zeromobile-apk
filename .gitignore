@@ -44,3 +44,7 @@ yarn-error.*
 .env
 .env.local
 .env.production
+
+# EAS credentials — contains keystore passwords in plaintext
+credentials.json
+credentials/

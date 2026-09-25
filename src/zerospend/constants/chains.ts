@@ -3,7 +3,7 @@ import { PAYOUT_COUNTRIES } from './countries';
 // Sell/from chains — live-tested against Flipeet off-ramp (rate endpoint).
 // Shared by the Sell screen now and the Wallet screen later: single source of
 // truth for chain ids, Flipeet network slugs, RPCs, explorers and stables.
-export type SellChainId = 'solana' | 'base' | 'bsc' | 'arbitrum';
+export type SellChainId = 'solana' | 'base' | 'bsc' | 'arbitrum' | 'arc';
 export type SellTokenSymbol = 'USDC' | 'USDT';
 
 export interface SellToken {
@@ -27,6 +27,17 @@ export interface SellChain {
     explorerTx: (hash: string) => string;
     nativeSymbol: string;
     tokens: SellToken[];
+    /**
+     * Set to true when the chain's primary stablecoin is the native gas token
+     * (e.g. Arc, where USDC is native and has no ERC-20 contract address).
+     * Transfers must use a native value send instead of contract.transfer().
+     */
+    nativeUSDC?: boolean;
+    /**
+     * Set to true when the payment processor (Flipeet) hasn't added this
+     * network yet. The chain will appear in the picker but be disabled.
+     */
+    comingSoon?: boolean;
 }
 
 const USDC_LOGO =
@@ -91,6 +102,24 @@ export const SELL_CHAINS: SellChain[] = [
         tokens: [
             { symbol: 'USDC', mint: '0xaf88d065E77c8cC2239327C5EDb3A432268e5831', decimals: 6, logo: USDC_LOGO },
             { symbol: 'USDT', mint: '0xFd086bC7D6060cB9a4Eb1A1C1BEbc0BF5AA3142', decimals: 6, logo: USDT_LOGO },
+        ],
+    },
+    {
+        id: 'arc',
+        name: 'Arc',
+        shortName: 'ARC',
+        logo: USDC_LOGO,
+        flipeetNetwork: 'arc',
+        evmChainId: 5042,
+        rpcUrls: ['https://rpc.mainnet.arc.io'],
+        explorerTx: hash => `https://explorer.arc.io/tx/${hash}`,
+        // USDC is the native gas token on Arc — no separate ERC-20 contract.
+        nativeSymbol: 'USDC',
+        nativeUSDC: true,
+        comingSoon: true,  // Flipeet Arc support pending — remove once live
+        tokens: [
+            // mint = 'native' signals that USDC is the native asset on Arc.
+            { symbol: 'USDC', mint: 'native', decimals: 6, logo: USDC_LOGO },
         ],
     },
 ];

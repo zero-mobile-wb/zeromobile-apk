@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useWallet } from '../context/WalletContext';
+import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { RootStackParamList } from '../types/navigation';
 import { getStablecoin } from '../constants/stablecoins';
 import {
@@ -65,7 +66,9 @@ const TokenDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { tokenSymbol, tokenName, tokenLogo, tokenMint, priceUSD: paramPrice } = route.params;
   const { currentTheme, themeId } = useTheme();
   const isDark = themeId === 'dark';
-  const { activeSolanaAddress, evmWallets, connection } = useWallet();
+  const { activeSolanaAddress, evmWallets, connection, isPrivyUser } = useWallet();
+  const privyEthWallet = useEmbeddedEthereumWallet();
+  const privyEvmAddress = (privyEthWallet.wallets?.[0] as any)?.address ?? null;
   const insets = useSafeAreaInsets();
 
   const stablecoin = getStablecoin(tokenSymbol as 'USDC' | 'USDT');
@@ -109,9 +112,15 @@ const TokenDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     if (!isStablecoin || !activeSolanaAddress) return;
     const fetchBalances = async () => {
+      const evmList = evmWallets.map(w => ({ address: w.address as `0x${string}`, chainId: w.chainId }));
+      if (privyEvmAddress) {
+        evmList.push({ address: privyEvmAddress, chainId: 'ethereum' as any });
+        evmList.push({ address: privyEvmAddress, chainId: 'base' as any });
+        evmList.push({ address: privyEvmAddress, chainId: 'polygon' as any });
+      }
       const balances = await getStablecoinBalances(
         activeSolanaAddress,
-        evmWallets.map(w => ({ address: w.address as `0x${string}`, chainId: w.chainId })),
+        evmList,
         priceUSD,
         connection
       );
@@ -119,7 +128,7 @@ const TokenDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       if (match) setBalanceData(match);
     };
     fetchBalances();
-  }, [isStablecoin, activeSolanaAddress, evmWallets, priceUSD, tokenSymbol, connection]);
+  }, [isStablecoin, activeSolanaAddress, evmWallets, privyEvmAddress, priceUSD, tokenSymbol, connection]);
 
   const chartLineColor = useMemo(() => {
     if (chartData.length < 2) return currentTheme.accent;

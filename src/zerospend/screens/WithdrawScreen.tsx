@@ -27,7 +27,7 @@ import { RootStackParamList } from '../../types/navigation';
 import Constants from 'expo-constants';
 import { getWalletBalance, TokenBalance } from '../../services/balanceService';
 import { sendSPLToken } from '../../services/transactionService';
-import { getErc20Balance, getEvmGasBalance, sendEvmToken, isValidEvmAddress } from '../../services/evmTransferService';
+import { getErc20Balance, getEvmGasBalance, getNativeBalance, sendEvmToken, sendNativeToken, isValidEvmAddress } from '../../services/evmTransferService';
 import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
@@ -191,13 +191,23 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
                     const tok = bal.tokens.find((t: TokenBalance) => t.mint === sellToken.mint || t.symbol === sellToken.symbol);
                     if (!cancelled) setTokenBalance(tok ? tok.uiAmount : 0);
                 } else if (activeEvmAddress && isValidEvmAddress(activeEvmAddress)) {
-                    const bal = await getErc20Balance(
-                        sellChain.rpcUrls,
-                        sellToken.mint as `0x${string}`,
-                        activeEvmAddress as `0x${string}`,
-                        sellToken.decimals
-                    );
-                    if (!cancelled) setTokenBalance(bal);
+                    if (sellChain.nativeUSDC) {
+                        // Arc: USDC is native gas — use getBalance with 6 decimals
+                        const bal = await getNativeBalance(
+                            sellChain.rpcUrls,
+                            activeEvmAddress as `0x${string}`,
+                            sellToken.decimals
+                        );
+                        if (!cancelled) setTokenBalance(bal);
+                    } else {
+                        const bal = await getErc20Balance(
+                            sellChain.rpcUrls,
+                            sellToken.mint as `0x${string}`,
+                            activeEvmAddress as `0x${string}`,
+                            sellToken.decimals
+                        );
+                        if (!cancelled) setTokenBalance(bal);
+                    }
                 }
             } catch (e) {
                 console.error('Failed to load token balance', e);
@@ -366,13 +376,17 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
         }
         setIsSendingToken(true);
         try {
-            const gas = await getEvmGasBalance(sellChain.rpcUrls, activeEvmAddress as `0x${string}`);
-            if (gas !== null && gas <= 0) {
-                Alert.alert(
-                    'Not enough gas',
-                    `Your ${sellChain.name} wallet holds no ${sellChain.nativeSymbol} for network fees. Add a little ${sellChain.nativeSymbol} and try again.`
-                );
-                return;
+            // On Arc, USDC is the native gas token — no separate gas check needed.
+            if (!sellChain.nativeUSDC) {
+                const gas = await getEvmGasBalance(sellChain.rpcUrls, activeEvmAddress as `0x${string}`);
+                if (gas !== null && gas <= 0) {
+                    Alert.alert(
+                        'Not enough gas',
+                        `Your ${sellChain.name} wallet holds no ${sellChain.nativeSymbol} for network fees. Add a little ${sellChain.nativeSymbol} and try again.`
+                    );
+                    setIsSendingToken(false);
+                    return;
+                }
             }
             let sender: any;
             if (privyEvmAddress && (privyEthWallet as any).getProvider) {
@@ -382,19 +396,33 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
                 const pk = await exportEvmPrivateKey('ethereum' as any);
                 if (!pk) {
                     Alert.alert('Error', 'Unlock your wallet to send, then try again.');
+                    setIsSendingToken(false);
                     return;
                 }
                 sender = { type: 'keypair', privateKey: pk.startsWith('0x') ? pk : `0x${pk}` };
             }
-            const result = await sendEvmToken({
-                rpcUrls: sellChain.rpcUrls,
-                evmChainId: sellChain.evmChainId!,
-                token: sellToken.mint as `0x${string}`,
-                decimals: sellToken.decimals,
-                amount: targetAmount,
-                to: depositTo as `0x${string}`,
-                sender,
-            });
+            let result;
+            if (sellChain.nativeUSDC) {
+                // Arc: send native USDC (plain value transfer, no ERC-20 call)
+                result = await sendNativeToken({
+                    rpcUrls: sellChain.rpcUrls,
+                    evmChainId: sellChain.evmChainId!,
+                    decimals: sellToken.decimals,
+                    amount: targetAmount,
+                    to: depositTo as `0x${string}`,
+                    sender,
+                });
+            } else {
+                result = await sendEvmToken({
+                    rpcUrls: sellChain.rpcUrls,
+                    evmChainId: sellChain.evmChainId!,
+                    token: sellToken.mint as `0x${string}`,
+                    decimals: sellToken.decimals,
+                    amount: targetAmount,
+                    to: depositTo as `0x${string}`,
+                    sender,
+                });
+            }
             if (result.success && result.signature) {
                 Alert.alert(
                     'Success!',
@@ -739,7 +767,7 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
                         <View style={styles.detailRow}>
                             <Text style={[styles.detailLabel, { color: currentTheme.textLight }]}>Fee</Text>
                             <Text style={[styles.detailValue, { color: currentTheme.text }]}>
-                                {isSolana ? '≈ 0.000005 SOL' : `gas in ${sellChain.nativeSymbol}`}
+                                {isSolana ? '≈ 0.000005 SOL' : sellChain.nativeUSDC ? 'paid in USDC (native gas)' : `gas in ${sellChain.nativeSymbol}`}
                             </Text>
                         </View>
                     </View>
@@ -973,8 +1001,13 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
                                         return (
                                             <TouchableOpacity
                                                 key={chain.id}
-                                                style={[styles.sheetItem, active && { backgroundColor: currentTheme.border }]}
+                                                style={[
+                                                    styles.sheetItem,
+                                                    active && { backgroundColor: currentTheme.border },
+                                                    chain.comingSoon && { opacity: 0.5 },
+                                                ]}
                                                 onPress={() => {
+                                                    if (chain.comingSoon) return;
                                                     setTempChain(chain);
                                                     if (!chain.tokens.find(t => t.symbol === tempToken.symbol)) {
                                                         setTempToken(chain.tokens[0]);
@@ -985,10 +1018,15 @@ const WithdrawScreen: React.FC<WithdrawScreenProps> = ({ navigation }) => {
                                                 <View style={{ flex: 1 }}>
                                                     <Text style={[styles.sheetItemName, { color: currentTheme.text }]}>{chain.name}</Text>
                                                     <Text style={[styles.sheetItemSub, { color: currentTheme.textLight }]}>
-                                                        {chain.id === 'solana' ? 'Fast · low fees' : `Gas: ${chain.nativeSymbol}`}
+                                                        {chain.comingSoon ? 'Coming soon' : chain.id === 'solana' ? 'Fast · low fees' : chain.nativeUSDC ? 'Native USDC' : `Gas: ${chain.nativeSymbol}`}
                                                     </Text>
                                                 </View>
-                                                {active && <Ionicons name="checkmark-circle" size={22} color={currentTheme.textLight} />}
+                                                {chain.comingSoon
+                                                    ? <View style={{ backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Soon</Text>
+                                                      </View>
+                                                    : active && <Ionicons name="checkmark-circle" size={22} color={currentTheme.textLight} />
+                                                }
                                             </TouchableOpacity>
                                         );
                                     })}

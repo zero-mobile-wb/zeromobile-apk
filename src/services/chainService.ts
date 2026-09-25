@@ -1,7 +1,7 @@
 import { mnemonicToAccount } from 'viem/accounts';
-import { http, createPublicClient, formatEther } from 'viem';
+import { http, createPublicClient, formatEther, formatUnits } from 'viem';
 
-export type ChainId = 'solana' | 'ethereum' | 'monad' | 'polygon';
+export type ChainId = 'solana' | 'ethereum' | 'monad' | 'polygon' | 'base' | 'arc';
 
 export interface ChainConfig {
   id: ChainId;
@@ -40,11 +40,11 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     shortName: 'ETH',
     logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
     derivationIndex: 0,
-    rpcUrl: 'https://ethereum.publicnode.com',
+    rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
     rpcUrls: [
+      'https://eth-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
       'https://ethereum.publicnode.com',
       'https://rpc.ankr.com/eth',
-      'https://eth.llamarpc.com',
     ],
     explorerUrl: 'https://etherscan.io',
     decimals: 18,
@@ -58,11 +58,11 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     shortName: 'POL',
     logo: 'https://assets.coingecko.com/coins/images/4713/small/polygon.png',
     derivationIndex: 0,
-    rpcUrl: 'https://polygon-rpc.com',
+    rpcUrl: 'https://polygon-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
     rpcUrls: [
+      'https://polygon-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
       'https://polygon-rpc.com',
       'https://polygon.publicnode.com',
-      'https://polygon.drpc.org',
     ],
     explorerUrl: 'https://polygonscan.com',
     decimals: 18,
@@ -83,9 +83,43 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     isEvm: true,
     nativeCurrency: { name: 'Monad', symbol: 'MON', decimals: 18 },
   },
+  base: {
+    id: 'base',
+    name: 'Base',
+    symbol: 'ETH',
+    shortName: 'ETH',
+    logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png',
+    derivationIndex: 0,
+    rpcUrl: 'https://base-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
+    rpcUrls: [
+      'https://base-mainnet.g.alchemy.com/v2/alch_cwScl8Y8G9o5IgE0nfwS2',
+      'https://mainnet.base.org',
+      'https://base.publicnode.com',
+    ],
+    explorerUrl: 'https://basescan.org',
+    decimals: 18,
+    isEvm: true,
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  },
+  arc: {
+    id: 'arc',
+    name: 'Arc',
+    symbol: 'USDC',
+    shortName: 'USDC',
+    logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
+    derivationIndex: 0,
+    rpcUrl: 'https://rpc.mainnet.arc.io',
+    rpcUrls: [
+      'https://rpc.mainnet.arc.io',
+    ],
+    explorerUrl: 'https://explorer.arc.io',
+    decimals: 6,
+    isEvm: true,
+    nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 6 },
+  },
 };
 
-export const EVM_CHAINS: ChainConfig[] = [CHAINS.ethereum, CHAINS.polygon, CHAINS.monad];
+export const EVM_CHAINS: ChainConfig[] = [CHAINS.ethereum, CHAINS.base, CHAINS.polygon, CHAINS.arc, CHAINS.monad];
 
 export interface EvmWallet {
   address: `0x${string}`;
@@ -135,7 +169,7 @@ export async function getEvmBalance(
     try {
       const client = getEvmClientForUrl(urls[i]);
       const balance = await client.getBalance({ address });
-      return parseFloat(formatEther(balance));
+      return parseFloat(formatUnits(balance, chain.decimals));
     } catch (error) {
       if (i === urls.length - 1) {
         console.error(`[ChainService] Failed to fetch ${chain.name} balance:`, error);

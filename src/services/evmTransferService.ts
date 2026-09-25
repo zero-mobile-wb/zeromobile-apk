@@ -74,6 +74,27 @@ export async function getEvmGasBalance(rpcUrls: string[], owner: `0x${string}`):
     return null;
 }
 
+/**
+ * Native token balance with configurable decimals.
+ * Use this for Arc where USDC is native (6 decimals) instead of 18-decimal ETH.
+ */
+export async function getNativeBalance(
+    rpcUrls: string[],
+    owner: `0x${string}`,
+    decimals = 18
+): Promise<number | null> {
+    for (const url of rpcUrls) {
+        try {
+            const client = createPublicClient({ transport: http(url, { timeout: 10000 }) });
+            const raw = await client.getBalance({ address: owner });
+            return Number(formatUnits(raw, decimals));
+        } catch {
+            continue;
+        }
+    }
+    return null;
+}
+
 export function isValidEvmAddress(address: string): boolean {
     return /^0x[0-9a-fA-F]{40}$/.test(address || '');
 }
@@ -147,5 +168,63 @@ export async function sendEvmToken(params: EvmTransferParams): Promise<Transacti
         return { success: false, error: 'Wallet does not support EVM sends' };
     } catch (e: any) {
         return { success: false, error: e?.message || 'EVM transfer failed' };
+    }
+}
+
+/**
+ * Send the native token on chains like Arc where USDC is the native gas asset.
+ * Uses a plain value-transfer instead of an ERC-20 call.
+ */
+export async function sendNativeToken(params: Omit<EvmTransferParams, 'token'>): Promise<TransactionResult> {
+    const { rpcUrls, evmChainId, decimals, amount, to, sender } = params;
+    try {
+        if (!isValidEvmAddress(to)) return { success: false, error: 'Invalid recipient address' };
+        if (!(amount > 0)) return { success: false, error: 'Amount must be greater than 0' };
+
+        const value = parseUnits(String(amount), decimals);
+
+        if (sender.type === 'keypair') {
+            const account = privateKeyToAccount(sender.privateKey);
+            let lastError: any = null;
+            for (const url of rpcUrls) {
+                try {
+                    const walletClient = createWalletClient({
+                        account,
+                        transport: http(url, { timeout: 15000 }),
+                    });
+                    const hash = await walletClient.sendTransaction({
+                        to: to as `0x${string}`,
+                        value,
+                        chain: undefined,
+                    } as any);
+                    const pubClient = createPublicClient({ transport: http(url, { timeout: 15000 }) });
+                    const receipt = await pubClient.waitForTransactionReceipt({ hash });
+                    if (receipt.status === 'reverted') {
+                        return { success: false, error: 'Transaction reverted on-chain' };
+                    }
+                    return { success: true, signature: hash };
+                } catch (e: any) {
+                    lastError = e;
+                    continue;
+                }
+            }
+            return { success: false, error: lastError?.message || 'Native transfer failed on all RPCs' };
+        }
+
+        // Privy embedded wallet — EIP-1193 style send.
+        const provider = sender.provider;
+        const tx = { from: sender.address, to, value: `0x${value.toString(16)}` };
+        if (typeof provider?.request === 'function') {
+            const hash = await provider.request({ method: 'eth_sendTransaction', params: [tx] });
+            return { success: true, signature: typeof hash === 'string' ? hash : hash?.hash };
+        }
+        if (typeof provider?.sendTransaction === 'function') {
+            const res = await provider.sendTransaction(tx);
+            const hash = typeof res === 'string' ? res : res?.hash || res?.signature;
+            return { success: true, signature: hash };
+        }
+        return { success: false, error: 'Wallet does not support native sends' };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Native transfer failed' };
     }
 }

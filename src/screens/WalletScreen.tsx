@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import colors from '../constants/colors';
 import { useTheme } from '../context/ThemeContext';
 import { RootStackParamList } from '../types/navigation';
 import { getWalletBalance, WalletBalance } from '../services/balanceService';
+import { getTokenPriceUSD } from '../services/stablecoinService';
 import { useNetwork } from '../context/NetworkContext';
 import { getTransactionHistory } from '../services/heliusApi';
 import TransactionItem, { Transaction } from '../components/TransactionItem';
@@ -78,6 +79,17 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [stablecoinBalances, setStablecoinBalances] = useState<StablecoinBalance[]>([]);
   const [loadingStablecoins, setLoadingStablecoins] = useState(false);
+  const [evmPrices, setEvmPrices] = useState<Record<string, number>>({});
+
+  const fetchEvmPrices = async () => {
+    try {
+      const ethPrice = await getTokenPriceUSD('ethereum');
+      const polPrice = await getTokenPriceUSD('matic-network');
+      setEvmPrices({ ethereum: ethPrice, base: ethPrice, polygon: polPrice, arc: 1.0, monad: 0.0 });
+    } catch {
+      console.log('Failed to fetch EVM prices');
+    }
+  };
 
   useEffect(() => {
     if (!scannedPayment || !activeSolanaAddress || !connection) return;
@@ -225,10 +237,19 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
     }
     setLoadingTxs(true);
     try {
-      // Privy wallets are always on mainnet regardless of network toggle
       const effectiveNetwork = isPrivyUser ? 'mainnet-beta' : network;
-      const txs = await getTransactionHistory(addr, 3, effectiveNetwork);
-      setTransactions(txs);
+      const solanaTxs = await getTransactionHistory(addr, 3, effectiveNetwork);
+
+      // Fetch EVM transactions for Privy users
+      let evmTxs: any[] = [];
+      if (isPrivyUser && privyEvmAddress) {
+        const { getAllEvmTransactions } = await import('../services/evmHistoryService');
+        evmTxs = await getAllEvmTransactions(privyEvmAddress, 2);
+      }
+
+      // Merge and sort by timestamp
+      const allTxs = [...solanaTxs, ...evmTxs].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+      setTransactions(allTxs);
     } catch (e) {
       console.error(e);
     } finally {
@@ -304,6 +325,8 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
       const evmWalletList = evmWallets.map(w => ({ address: w.address as `0x${string}`, chainId: w.chainId }));
       if (privyEvmAddress) {
         evmWalletList.push({ address: privyEvmAddress, chainId: 'ethereum' });
+        evmWalletList.push({ address: privyEvmAddress, chainId: 'base' });
+        evmWalletList.push({ address: privyEvmAddress, chainId: 'polygon' });
       }
       const usdcPrice = walletBalance?.tokens.find((t: any) => t.symbol === 'USDC')?.priceUSD ?? 1.0;
       const balances = await getStablecoinBalances(solAddress, evmWalletList, usdcPrice, connection);
@@ -322,17 +345,39 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
     fetchEvmBalances();
     fetchTransactions(addr);
     fetchStablecoinBalances();
+    fetchEvmPrices();
     const interval = setInterval(() => {
       fetchBalance(true);
       fetchEvmBalances();
       fetchTransactions(addr);
+      fetchStablecoinBalances();
+      fetchEvmPrices();
     }, 30000);
     return () => clearInterval(interval);
   }, [wallet, connection, privySolanaAddress, network]);
 
   useEffect(() => {
     fetchEvmBalances();
+    fetchStablecoinBalances();
+    fetchTransactions(activeSolanaAddress ?? undefined);
   }, [evmWallets, privyEvmAddress]);
+
+  const grandTotalUSD = useMemo(() => {
+    if (!walletBalance) return 0;
+    let total = walletBalance.solValueUSD;
+    // Non-stable SPL tokens
+    const nonStableSpl = walletBalance.tokens.filter(t => !['USDC', 'USDT'].includes(t.symbol));
+    total += nonStableSpl.reduce((sum, t) => sum + t.valueUSD, 0);
+    // Stablecoins (Solana + EVM parts)
+    total += stablecoinBalances.reduce((sum, sc) => sum + sc.totalUSD, 0);
+    // EVM Native Tokens
+    const ethPrice = evmPrices.ethereum || 0;
+    const polPrice = evmPrices.polygon || 0;
+    const ethBal = (evmBalances['ethereum'] || 0) + (evmBalances['base'] || 0) + (evmBalances['privy_evm_ethereum'] || 0) + (evmBalances['privy_evm_base'] || 0);
+    const polBal = (evmBalances['polygon'] || 0) + (evmBalances['privy_evm_polygon'] || 0);
+    total += (ethBal * ethPrice) + (polBal * polPrice);
+    return total;
+  }, [walletBalance, stablecoinBalances, evmBalances, evmPrices]);
 
   const chainOptions: { id: ChainId | 'all' | 'evm'; label: string; logo?: string }[] = [
     { id: 'all', label: 'All chains' },
@@ -454,7 +499,9 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
                     <Text style={[styles.tokenAmount, { color: currentTheme.text }]}>
                       {balance !== undefined ? balance.toFixed(3) : '0.000'}
                     </Text>
-                    <Text style={[styles.tokenValue, { color: currentTheme.textLight }]}>{chain.symbol}</Text>
+                    <Text style={[styles.tokenValue, { color: currentTheme.textLight }]}>
+                      ${((balance || 0) * (evmPrices[chain.id] || 0)).toFixed(2)}
+                    </Text>
                   </>
                 )}
               </View>
@@ -485,7 +532,9 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
                   <Text style={[styles.tokenAmount, { color: currentTheme.text }]}>
                     {evmBalances[`privy_evm_${chain.id}`] !== undefined ? evmBalances[`privy_evm_${chain.id}`].toFixed(3) : '0.000'}
                   </Text>
-                  <Text style={[styles.tokenValue, { color: currentTheme.textLight }]}>{chain.symbol}</Text>
+                  <Text style={[styles.tokenValue, { color: currentTheme.textLight }]}>
+                    ${((evmBalances[`privy_evm_${chain.id}`] || 0) * (evmPrices[chain.id] || 0)).toFixed(2)}
+                  </Text>
                 </>
               )}
             </View>
@@ -565,7 +614,7 @@ const WalletScreen: React.FC<WalletScreenProps> = ({ navigation }) => {
             ) : (
               <>
                 <Text style={[styles.balanceAmount, { color: currentTheme.text, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>
-                  {walletBalance ? formatAmount(walletBalance.totalUSD) : formatAmount(0)}
+                  {walletBalance ? formatAmount(grandTotalUSD) : formatAmount(0)}
                 </Text>
                 {walletBalance && <Text style={[styles.solBalanceText, { color: currentTheme.textLight, textAlign: 'center' }]}>{walletBalance.solBalance.toFixed(4)} SOL</Text>}
               </>

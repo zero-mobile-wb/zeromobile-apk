@@ -81,6 +81,9 @@ const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
                 error={error}
             />
             <SpendButton title="Log in" onPress={submit} loading={loading} disabled={!valid} />
+            <Text style={[styles.forgot, { color: currentTheme.text }]} onPress={() => navigation.navigate('SpendForgotPassword')}>
+                Forgot password?
+            </Text>
             <Text style={[styles.signup, { color: currentTheme.text }]} onPress={() => navigation.navigate('SpendEmail')}>
                 New here? Create an account
             </Text>
@@ -89,6 +92,14 @@ const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
+    forgot: {
+        fontFamily: spendTheme.font,
+        fontSize: 14,
+        color: spendTheme.text,
+        textDecorationLine: 'underline',
+        textAlign: 'center',
+        marginTop: 16,
+    },
     signup: {
         fontFamily: spendTheme.font,
         fontSize: 14,

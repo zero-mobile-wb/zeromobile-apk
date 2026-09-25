@@ -20,7 +20,7 @@ import { useWallet } from '../context/WalletContext';
 import { useNetwork } from '../context/NetworkContext';
 import { RootStackParamList } from '../types/navigation';
 import { getTransactionHistory } from '../services/heliusApi';
-import { usePrivy } from '@privy-io/expo';
+import { usePrivy, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import TransactionItem, { Transaction } from '../components/TransactionItem';
 
 const MAX_TRANSACTIONS = 10; // Only show 10 most recent transactions
@@ -42,6 +42,8 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
   const lastSignatureRef = useRef<string | null>(null);
 
   const { isReady: privyReady } = usePrivy();
+  const privyEthWallet = useEmbeddedEthereumWallet();
+  const privyEvmAddress = (privyEthWallet.wallets?.[0] as any)?.address ?? null;
   // Privy wallets are always mainnet — override network for tx history
   const effectiveTxNetwork = isPrivyUser ? 'mainnet-beta' : network;
 
@@ -58,16 +60,25 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
     }
 
     try {
-      // Privy wallets are always on mainnet
       const effectiveNetwork = isPrivyUser ? 'mainnet-beta' : network;
-      const txs = await getTransactionHistory(address, MAX_TRANSACTIONS, effectiveNetwork);
+      const solanaTxs = await getTransactionHistory(address, MAX_TRANSACTIONS, effectiveNetwork);
 
-      // Update last signature for comparison
-      if (txs.length > 0) {
-        lastSignatureRef.current = txs[0].signature;
+      // Fetch EVM transactions for Privy users
+      let evmTxs: any[] = [];
+      if (isPrivyUser && privyEvmAddress) {
+        const { getAllEvmTransactions } = await import('../services/evmHistoryService');
+        evmTxs = await getAllEvmTransactions(privyEvmAddress, 3);
+        console.log('[Activity] EVM txs:', evmTxs.length, 'for', privyEvmAddress);
       }
 
-      setTransactions(txs);
+      // Merge and sort by timestamp
+      const allTxs = [...solanaTxs, ...evmTxs].sort((a, b) => b.timestamp - a.timestamp).slice(0, MAX_TRANSACTIONS);
+
+      if (allTxs.length > 0) {
+        lastSignatureRef.current = allTxs[0].signature;
+      }
+
+      setTransactions(allTxs);
     } catch (error) {
       console.error('Error fetching transactions:', error);
       setTransactions([]);
@@ -102,7 +113,7 @@ const ActivityScreen: React.FC<ActivityScreenProps> = ({ navigation }) => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [wallet, connection, activeSolanaAddress, network]);
+  }, [wallet, connection, activeSolanaAddress, network, privyEvmAddress]);
 
   const renderTransaction = ({ item }: { item: Transaction }) => (
     <TransactionItem item={item} />

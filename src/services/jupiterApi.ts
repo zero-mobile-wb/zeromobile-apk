@@ -165,7 +165,7 @@ async function getTokenMetadata(mintAddress: string): Promise<TokenMetadata> {
     return metadata;
   }
 
-  // Fallback: search by mint address
+  // Fallback: search by mint address in Jupiter
   const searchResult = await searchToken(mintAddress);
   if (searchResult) {
     const metadata: TokenMetadata = {
@@ -177,7 +177,25 @@ async function getTokenMetadata(mintAddress: string): Promise<TokenMetadata> {
     return metadata;
   }
 
-  // Default metadata if not found
+  // Final fallback: check prestocks.com catalog (covers xStock SPL tokens on Solana)
+  try {
+    const res = await fetchWithTimeout('https://prestocks.com/api/prestocks', { headers: { Accept: 'application/json' } }, 5000);
+    if (res.ok) {
+      const stocks: any[] = await res.json();
+      const stock = stocks.find((s: any) => s.contract_address === mintAddress);
+      if (stock) {
+        const metadata: TokenMetadata = {
+          symbol: stock.symbol || 'UNKNOWN',
+          name: stock.name || 'Unknown Token',
+          logoURI: stock.image,
+        };
+        tokenMetadataCache[mintAddress] = { ...metadata, timestamp: Date.now() };
+        return metadata;
+      }
+    }
+  } catch (_) { /* ignore — prestocks API may be down */ }
+
+  // Default metadata if not found anywhere
   const defaultMetadata: TokenMetadata = {
     symbol: mintAddress.slice(0, 4) + '...',
     name: 'Unknown Token',
